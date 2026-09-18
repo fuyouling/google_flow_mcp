@@ -104,7 +104,7 @@ class ImageEditPage(BasePage):
     def save_and_close(self):
         """Click the Done/Save button to close the edit view."""
         logger.info("Attempting to click Done/Save button")
-        done_btn = self.tab.ele('xpath://button[@aria-label="完成修改"]', timeout=5)
+        done_btn = self.tab.ele('xpath://button[@aria-label="完成场景编辑"]', timeout=5)
         if done_btn:
             done_btn.click()
             time.sleep(1)
