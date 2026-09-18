@@ -121,8 +121,13 @@ def apply_video_settings(
         time.sleep(0.5)
 
     # 8. Close settings panel by pressing ESC
-    page.run_cdp('Input.dispatchKeyEvent', type='keyDown', windowsVirtualKeyCode=27)
+    page.run_cdp('Input.dispatchKeyEvent', type='rawKeyDown', windowsVirtualKeyCode=27)
+    page.run_cdp('Input.dispatchKeyEvent', type='keyUp', windowsVirtualKeyCode=27)
     time.sleep(0.8)
+    if page.ele('.cdk-overlay-backdrop', timeout=0.5):
+        page.run_cdp('Input.dispatchKeyEvent', type='rawKeyDown', windowsVirtualKeyCode=27)
+        page.run_cdp('Input.dispatchKeyEvent', type='keyUp', windowsVirtualKeyCode=27)
+        time.sleep(0.5)
 
 
 def bind_frame_image(page, chip_label: str, image_name: str) -> None:
@@ -198,16 +203,83 @@ def add_asset_to_prompt(page, asset: str) -> None:
 
 def input_prompt(page, prompt: str) -> None:
     """Enter prompt into flow-rich-text-editor."""
+    # flow-rich-text-editor contains a ProseMirror div[contenteditable="true"].
+    # Ensure any open popups or overlays are closed before focusing.
     prompt_entered = False
-    editor = page.ele('xpath://flow-rich-text-editor[@class="prompt-input"]', timeout=2)
+    if page.ele('.cdk-overlay-backdrop', timeout=0.5):
+        page.run_cdp('Input.dispatchKeyEvent', type='rawKeyDown', windowsVirtualKeyCode=27)
+        page.run_cdp('Input.dispatchKeyEvent', type='keyUp', windowsVirtualKeyCode=27)
+        time.sleep(0.5)
+
+    editor = page.ele('xpath://flow-rich-text-editor[@class="prompt-input"]//div[@contenteditable="true"]', timeout=3)
+    if not editor:
+        editor = page.ele('xpath://flow-rich-text-editor[@class="prompt-input"]', timeout=2)
+
     if editor:
-        editor.input(prompt)
-        prompt_entered = True
-        logger.info("Prompt entered via flow-rich-text-editor")
+        editor.click()
+        time.sleep(0.3)
+
+        # Strategy 1: CDP Input.insertText — fires real browser input events into ProseMirror
+        try:
+            page.run_cdp('Input.insertText', text=prompt)
+            time.sleep(0.5)
+            pm_text = page.run_js("return (document.querySelector('flow-rich-text-editor.prompt-input div[contenteditable=\"true\"]') || {}).innerText || '';")
+            if prompt.strip() in pm_text.strip():
+                prompt_entered = True
+                logger.info("Prompt entered via CDP Input.insertText and verified")
+            else:
+                logger.warning(f"CDP Input.insertText executed but text not verified in editor (got {pm_text!r}), trying JS clipboard fallback")
+        except Exception as e:
+            logger.warning(f"CDP Input.insertText failed: {e!r}, trying JS clipboard fallback")
+
+        # Strategy 2: JS set clipboard + CDP Ctrl+V (fallback)
+        if not prompt_entered:
+            try:
+                page.run_js("""
+                    (function(text) {
+                        navigator.clipboard.writeText(text).catch(function() {
+                            // Sync fallback via execCommand on a temp textarea
+                            var ta = document.createElement('textarea');
+                            ta.value = text;
+                            document.body.appendChild(ta);
+                            ta.select();
+                            document.execCommand('copy');
+                            document.body.removeChild(ta);
+                        });
+                    })(arguments[0]);
+                """, prompt)
+                time.sleep(0.2)
+                editor.click()
+                time.sleep(0.1)
+                # Ctrl+V via CDP key events
+                page.run_cdp('Input.dispatchKeyEvent', type='keyDown',
+                             modifiers=2, windowsVirtualKeyCode=86, key='v', code='KeyV')
+                page.run_cdp('Input.dispatchKeyEvent', type='keyUp',
+                             modifiers=2, windowsVirtualKeyCode=86, key='v', code='KeyV')
+                time.sleep(0.5)
+                pm_text = page.run_js("return (document.querySelector('flow-rich-text-editor.prompt-input div[contenteditable=\"true\"]') || {}).innerText || '';")
+                if prompt.strip() in pm_text.strip():
+                    prompt_entered = True
+                    logger.info("Prompt entered via JS clipboard + CDP Ctrl+V and verified")
+            except Exception as e2:
+                logger.warning(f"JS clipboard fallback failed: {e2!r}")
+
+        # Strategy 3: DrissionPage input fallback
+        if not prompt_entered:
+            try:
+                editor.input(prompt)
+                time.sleep(0.5)
+                pm_text = page.run_js("return (document.querySelector('flow-rich-text-editor.prompt-input div[contenteditable=\"true\"]') || {}).innerText || '';")
+                if prompt.strip() in pm_text.strip():
+                    prompt_entered = True
+                    logger.info("Prompt entered via editor.input() fallback and verified")
+            except Exception as e3:
+                logger.warning(f"editor.input() fallback failed: {e3!r}")
+
         time.sleep(1)
 
     if not prompt_entered:
-        raise Exception("Could not find prompt input field on the page")
+        raise Exception("Could not find prompt input field on the page or prompt could not be entered")
 
 
 def register_video_create_tool(mcp: FastMCP) -> None:
