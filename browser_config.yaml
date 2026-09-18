@@ -1,0 +1,106 @@
+# browser_config.yaml
+# ─────────────────────────────────────────────────────────────────────
+# 浏览器启动参数配置
+# 每项包含：
+#   enabled     : true/false  是否启用该参数（修改此值即可开关）
+#   flag        : Chrome 命令行参数（原样传入 ChromiumOptions）
+#   description : 参数说明
+#
+# 注意：
+#   --user-data-dir  由 CHROME_USER_DATA_DIR 环境变量控制，不在此处配置
+#   Windows 下请将 --no-sandbox / --disable-dev-shm-usage 设为 false
+# ─────────────────────────────────────────────────────────────────────
+
+browser:
+
+  # ── 模式控制 ────────────────────────────────────────────────────────
+  - enabled: false                        # 默认不开启无头模式；需要后台无 GUI 运行时改为 true
+    flag: "--headless=new"
+
+  # ── 远程调试 ────────────────────────────────────────────────────────
+  - enabled: true                        # 开启后可用 DevTools 或 DrissionPage 接入
+    flag: "--remote-debugging-port=9222"
+    description: "远程调试端口，DrissionPage 通过此端口接管已运行的浏览器实例"
+    
+  - enabled: true
+    flag: "--remote-debugging-address=0.0.0.0"
+    description: "允许所有 IP 地址连接远程调试端口"
+    
+  - enabled: true
+    flag: "--remote-allow-origins=*"
+    description: "允许所有跨域请求连接调试端口 (解决 403/404 Handshake 报错)"
+
+  # ── 首次启动 / 默认浏览器弹窗抑制 ────────────────────────────────────
+  - enabled: true
+    flag: "--no-first-run"
+    description: "跳过 Chrome 首次运行欢迎页"
+
+  - enabled: true
+    flag: "--no-default-browser-check"
+    description: "禁止检查 Chrome 是否为默认浏览器（避免弹窗干扰）"
+
+  - enabled: true
+    flag: "--hide-crash-restore-bubble"
+    description: "隐藏崩溃恢复提示气泡"
+
+  # ── 稳定性 ──────────────────────────────────────────────────────────
+  - enabled: true                        # Linux / WSL2 必须；Windows 下改为 false
+    flag: "--no-sandbox"
+    description: "禁用沙箱（Linux 容器 / Docker / WSL2 环境必须开启）"
+
+  - enabled: true                        # Linux / WSL2 推荐；Windows 下改为 false
+    flag: "--disable-dev-shm-usage"
+    description: "禁用 /dev/shm，改用 /tmp（Linux 内存受限或 WSL2 环境必须开启）"
+
+  - enabled: false
+    flag: "--disable-gpu"
+    description: "禁用 GPU 加速（无独立显卡 / WSL2 / 无头模式下推荐开启）"
+
+  # ── 窗口 ────────────────────────────────────────────────────────────
+  - enabled: true
+    flag: "--window-size=1920,1200"
+    description: "固定窗口分辨率，确保无头模式下页面布局与有头模式一致"
+
+  # ── 代理设置 ────────────────────────────────────────────────────────
+  - enabled: true
+    flag: "--proxy-server=http://127.0.0.1:7890"
+    description: "设置代理服务器（如需使用环境变理则将其设为 false，直接修改为你本机的代理端口）"
+
+  - enabled: true
+    flag: "--proxy-bypass-list=127.0.0.1,localhost"
+    description: "绕过代理的本地地址列表（极为重要：若开启代理，必须绕过本地以防 WebSocket 握手失败）"
+
+  # ── 反自动化检测 ─────────────────────────────────────────────────────
+  - enabled: false
+    flag: "--disable-blink-features=AutomationControlled"
+    description: "隐藏 navigator.webdriver 特征，降低被页面检测为自动化的风险"
+
+  # ── 证书 ────────────────────────────────────────────────────────────
+  - enabled: true
+    flag: "--ignore-certificate-errors"
+    description: "忽略 SSL/TLS 证书错误（适用于内网或自签名证书环境）"
+
+  # ── 以下参数默认关闭，按需开启 ─────────────────────────────────────────
+  - enabled: false
+    flag: "--disable-extensions"
+    description: "禁用所有扩展程序（加快启动速度，但会影响已安装插件）"
+
+  - enabled: false
+    flag: "--disable-background-networking"
+    description: "禁用后台网络请求"
+
+  - enabled: false
+    flag: "--disable-sync"
+    description: "禁用 Google 账号数据同步"
+
+  - enabled: false
+    flag: "--start-maximized"
+    description: "启动时最大化窗口（有头模式下替代 --window-size 使用）"
+
+  - enabled: false
+    flag: "--lang=zh-CN"
+    description: "强制设置浏览器语言为中文（影响页面语言判断）"
+
+  - enabled: false
+    flag: "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    description: "自定义 User-Agent（如需伪装特定客户端环境时开启）"
