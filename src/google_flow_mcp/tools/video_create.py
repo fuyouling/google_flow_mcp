@@ -285,66 +285,119 @@ def input_prompt(page, prompt: str) -> None:
 def register_video_create_tool(mcp: FastMCP) -> None:
     @mcp.tool()
     def video_create(
-        project_id: Annotated[str, Field(description="Google Flow 项目的唯一 ID")],
-        prompt: Annotated[str, Field(description="视频生成的提示词 (Prompt)")],
-        video_name: Annotated[str, Field(description="生成的视频名称，留空则自动生成随机名称")] = "",
-        model_name: Annotated[str, Field(description="使用的模型，仅限以下四个值: 'Omni 1.1 Flash', 'Veo 3.1 - Lite', 'Veo 3.1 - Fast', 'Veo 3.1 - Quality'")] = "Omni 1.1 Flash",
-        mode: Annotated[str, Field(description="生成模式。'frame' (帧模式) 需提供首尾帧；'asset' (素材模式) 需提供参考素材")] = "frame",
-        start_frame: Annotated[str, Field(description="[仅帧模式] 首帧图片名称，必须与项目内的资源匹配")] = "",
-        end_frame: Annotated[str, Field(description="[仅帧模式] 尾帧图片名称，必须与项目内的资源匹配")] = "",
-        assets: Annotated[str, Field(description="[仅素材模式] 逗号分隔的参考素材名称列表")] = "",
-        aspect_ratio: Annotated[str, Field(description="视频宽高比，仅支持 '16:9' 或 '9:16'")] = "16:9",
-        resolution: Annotated[str, Field(description="视频分辨率 (仅 Omni 模型支持)，可选 '360p', '720p'")] = "720p",
-        duration: Annotated[int, Field(description="视频时长 (仅 Omni 模型支持)，单位为秒，例如 8")] = 8,
-        quantity: Annotated[int, Field(description="生成的视频数量，仅支持 1, 2, 3, 4")] = 1,
+        project_id: Annotated[str, Field(description="Google Flow 项目的唯一 ID，视频将创建在该项目内")],
+        prompt: Annotated[str, Field(description="视频生成的提示词 (Prompt)，详细描述视频画面、主体动作、镜头运镜及光影风格")],
+        video_name: Annotated[str, Field(description="生成的视频重命名名称，便于在项目素材库中检索与引用。留空则自动生成随机名称")] = "",
+        model_name: Annotated[str, Field(description="生成视频的模型名称。可选: 'Omni 1.1 Flash' (支持调节分辨率与时长), 'Veo 3.1 - Lite', 'Veo 3.1 - Fast', 'Veo 3.1 - Quality' (电影级高画质与运镜)")] = "Omni 1.1 Flash",
+        mode: Annotated[str, Field(description="生成模式: 'frame' (首尾帧模式，需提供 start_frame 和 end_frame) 或 'asset' (素材参考/纯文本模式，可提供 assets，若 assets 留空则为纯文生视频)")] = "frame",
+        start_frame: Annotated[str, Field(description="[仅帧模式] 首帧图片名称，必须为该项目中已存在的图片资源")] = "",
+        end_frame: Annotated[str, Field(description="[仅帧模式] 尾帧图片名称，必须为该项目中已存在的图片资源")] = "",
+        assets: Annotated[str, Field(description="[仅素材模式] 逗号分隔的参考素材名称列表(项目中已有资源)。若留空则表示纯文本生视频")] = "",
+        aspect_ratio: Annotated[str, Field(description="视频宽高比: '16:9' (横屏，适用于桌面/影视) 或 '9:16' (竖屏，适用于移动端短视频)")] = "16:9",
+        resolution: Annotated[str, Field(description="视频分辨率 (仅 Omni 1.1 Flash 模型生效): 可选 '360p' 或 '720p'")] = "720p",
+        duration: Annotated[int, Field(description="视频时长，单位为秒 (仅 Omni 1.1 Flash 模型生效): 例如 8")] = 8,
+        quantity: Annotated[int, Field(description="单次并发生成的视频数量: 可选 1, 2, 3, 4 (对应界面 x1 ~ x4)")] = 1,
+        download: Annotated[str, Field(description="可选下载清晰度: '270p', '720p', '1080p'。指定后将自动下载至本地目录并重命名，留空则不下载")] = "",
     ) -> str:
         """
         在 Google Flow 中发起后台视频生成任务。
         
-        重要规则：
-        1. 模式互斥：
-           - 如果 mode 为 'frame'，必须提供 start_frame 和 end_frame，且不能提供 assets。
-           - 如果 mode 为 'asset'，可以提供 assets，但绝不能提供 start_frame 或 end_frame。
-        2. 模型限制：
-           - 'Omni 1.1 Flash' 模型：可以选择 resolution (360p 或 720p) 和 duration (视频时长)。
-           - 'Veo 3.1 - Lite', 'Veo 3.1 - Fast', 'Veo 3.1 - Quality' 模型：不支持设置 resolution 和 duration。
-        3. 参数枚举：
-           - quantity 仅支持 1, 2, 3, 4。
-           - aspect_ratio 仅支持 '16:9' 或 '9:16'。
-        4. 异步执行：本工具会立即返回一个 job_id。你**必须**在后续使用 `video_status` 工具轮询该 job_id，直到状态变为 completed 或 error (超时时间 5 分钟)。
+        【一、 核心工作流与异步架构】
+        1. 前置条件：必须提供有效的 project_id；若使用首尾帧或参考素材，该图片/素材必须已存在于该项目中。
+        2. 异步执行：本工具在后台异步执行生成任务，立即返回任务启动信息与唯一 job_id（此时 is_finished=False）。
+        3. 状态轮询：视频生成通常耗时 1~3 分钟（最大超时 5 分钟），智能体【必须】使用返回的 job_id 定期调用 `video_status` 工具轮询状态（建议每隔 5~10 秒轮询一次）。
+        4. 结束判定：智能体必须根据 `video_status` 返回的 `is_finished` 字段判定任务是否结束：
+           - 若 `is_finished == False`：任务仍在生成中，智能体【严禁】停止轮询或向用户提前下结论，必须等待 5-10 秒后继续调用 `video_status` 查询。
+           - 若 `is_finished == True`：任务已彻底完成（或失败），智能体方可停止轮询，并向用户展示视频链接、本地下载文件路径或错误信息。
+        
+        【二、 两大生成模式与参数互斥规则】
+        1. 首尾帧模式 (mode='frame')：
+           - 适用场景：指定起始图与结束图，让 AI 生成两张图之间的动作过渡/插值动画。
+           - 必需参数：必须同时提供 start_frame 和 end_frame（项目内已有的图片资源名称）。
+           - 互斥限制：【严禁】传递 assets 参数（否则触发 ValidationError 报错）。
+        2. 素材参考 / 纯文本模式 (mode='asset')：
+           - 纯文本生视频 (Text-to-Video)：mode='asset' 且 assets="" 留空，仅依靠 prompt 纯文本描述生成。
+           - 素材参考生视频 (Asset-to-Video)：mode='asset' 且 assets 提供逗号分隔的已有素材名称（作为主体或风格参考）。
+           - 互斥限制：【严禁】传递 start_frame 或 end_frame 参数（否则触发 ValidationError 报错）。
+        
+        【三、 支持的模型系列与参数差异】
+        1. 'Omni 1.1 Flash'：
+           - 独占特性：支持在设置面板中指定分辨率 resolution ('360p', '720p') 与视频时长 duration (例如 8 秒)。响应快，适合快速预览。
+        2. 'Veo 3.1 - Lite', 'Veo 3.1 - Fast', 'Veo 3.1 - Quality'：
+           - 独占特性：电影级运镜与光影质感。不支持设置 resolution 与 duration（传入将被自动忽略）。推荐追求高质量画面时使用。
+        
+        【四、 画面外观与产物控制】
+        - aspect_ratio：'16:9' (标准横屏) 或 '9:16' (移动端竖屏短视频)。
+        - quantity：单次生成数量，支持 1 ~ 4 (对应界面 x1 ~ x4)。
+        - video_name：生成完毕后自动进入详情页重命名该视频卡片，便于素材库归档管理。留空则默认为 video_{job_id[:8]}。
+        - download：指定 '270p', '720p', '1080p' 后，自动触发本地下载并重命名为 {video_name}.mp4，完成后在 video_status 中返回本地文件绝对路径 video_local_path。
+        
+        【五、 智能体典型调用场景示例】
+        - 场景 1：纯文生视频 (Omni 720p 8秒横屏 + 本地 1080p 下载)
+          video_create(project_id="...", prompt="...", model_name="Omni 1.1 Flash", mode="asset", assets="", aspect_ratio="16:9", resolution="720p", duration=8, download="1080p")
+        - 场景 2：首尾帧过渡视频 (Veo 3.1 Fast 帧动画)
+          video_create(project_id="...", prompt="...", model_name="Veo 3.1 - Fast", mode="frame", start_frame="sunny_landscape", end_frame="snowy_landscape", aspect_ratio="16:9")
+        - 场景 3：参考已有素材生视频 (Veo 3.1 Quality 竖屏)
+          video_create(project_id="...", prompt="...", model_name="Veo 3.1 - Quality", mode="asset", assets="hero_portrait", aspect_ratio="9:16")
         """
         # 1. Parameter validation
+        if download and download.strip().lower() not in ("270p", "720p", "1080p"):
+            return json.dumps({
+                "success": False,
+                "status": "error",
+                "is_finished": True,
+                "error_type": "ValidationError",
+                "error": f"不支持的下载清晰度: {download!r}。仅支持 '270p', '720p', '1080p' 或留空不下载。",
+                "message": f"不支持的下载清晰度: {download!r}。仅支持 '270p', '720p', '1080p' 或留空不下载。",
+                "next_action": "参数错误，任务未启动，智能体请修正 download 参数后重新调用。"
+            }, ensure_ascii=False)
+        download = download.strip().lower() if download else ""
+
         is_frame_mode = mode.lower() in ["frame", "frames", "帧"]
         if is_frame_mode:
             if not start_frame or not end_frame:
                 return json.dumps({
                     "success": False,
                     "status": "error",
+                    "is_finished": True,
                     "error_type": "ValidationError",
-                    "error": "在帧模式(frame)下，必须同时提供视频的首帧图片(start_frame)和尾帧图片(end_frame)。"
+                    "error": "在帧模式(frame)下，必须同时提供视频的首帧图片(start_frame)和尾帧图片(end_frame)。",
+                    "message": "在帧模式(frame)下，必须同时提供视频的首帧图片(start_frame)和尾帧图片(end_frame)。",
+                    "next_action": "参数缺失，任务未启动，智能体请同时提供 start_frame 和 end_frame 后重试。"
                 }, ensure_ascii=False)
             if assets and assets.strip():
                 return json.dumps({
                     "success": False,
                     "status": "error",
+                    "is_finished": True,
                     "error_type": "ValidationError",
-                    "error": "在帧模式(frame)下不能选择其它素材(assets)，仅支持首帧与尾帧。"
+                    "error": "在帧模式(frame)下不能选择其它素材(assets)，仅支持首帧与尾帧。",
+                    "message": "在帧模式(frame)下不能选择其它素材(assets)，仅支持首帧与尾帧。",
+                    "next_action": "参数冲突，帧模式不支持 assets 参数，智能体请清空 assets 后重试。"
                 }, ensure_ascii=False)
         else:
             if start_frame or end_frame:
                 return json.dumps({
                     "success": False,
                     "status": "error",
+                    "is_finished": True,
                     "error_type": "ValidationError",
-                    "error": "在素材模式(asset)下不支持首尾帧(start_frame/end_frame)，如需使用首尾帧请指定 mode='frame'。"
+                    "error": "在素材模式(asset)下不支持首尾帧(start_frame/end_frame)，如需使用首尾帧请指定 mode='frame'。",
+                    "message": "在素材模式(asset)下不支持首尾帧(start_frame/end_frame)，如需使用首尾帧请指定 mode='frame'。",
+                    "next_action": "参数冲突，素材模式不支持首尾帧参数，智能体请指定 mode='frame' 或移除首尾帧参数后重试。"
                 }, ensure_ascii=False)
 
         job_id = str(uuid.uuid4())
         _video_jobs[job_id] = {
+            "job_id": job_id,
             "status": "pending",
+            "is_finished": False,
             "progress": 0,
+            "progress_percent": 0,
+            "progress_text": "0%",
             "elapsed_seconds": 0,
-            "message": "视频创建任务已在后台启动，超时时间为 5 分钟 (300s)。",
+            "message": "视频创建任务已在后台启动，超时时间为 5 分钟 (300s)，正在准备参数并导航至项目...",
+            "next_action": f"任务初始化中（尚未完成），请等待 5-10 秒后继续调用 video_status(job_id='{job_id}') 检查进度。",
             "details": {
                 "project_id": project_id,
                 "model_name": model_name,
@@ -356,6 +409,7 @@ def register_video_create_tool(mcp: FastMCP) -> None:
                 "resolution": resolution,
                 "duration": duration,
                 "quantity": quantity,
+                "download": download,
             }
         }
 
@@ -420,12 +474,15 @@ def register_video_create_tool(mcp: FastMCP) -> None:
                 logger.info(f"Video job {job_id}: Clicked generate button.")
 
                 _video_jobs[job_id].update({
+                    "job_id": job_id,
                     "status": "generating",
+                    "is_finished": False,
                     "progress": 0,
                     "progress_percent": 0,
                     "progress_text": "0%",
                     "elapsed_seconds": 0,
                     "message": "已点击生成，等待开始生成...",
+                    "next_action": f"任务已提交，等待开始生成，请等待 5-10 秒后继续调用 video_status(job_id='{job_id}') 检查进度。",
                 })
 
                 # 1. Wait for loading-percentage element to appear (up to 40s)
@@ -474,12 +531,15 @@ def register_video_create_tool(mcp: FastMCP) -> None:
                     text = ' / '.join(progress_texts) if progress_texts else f"{percent}%"
                     elapsed = time.time() - start_time
                     _video_jobs[job_id].update({
+                        "job_id": job_id,
                         "status": "generating",
+                        "is_finished": False,
                         "progress": percent,
                         "progress_percent": percent,
                         "progress_text": text,
                         "elapsed_seconds": round(elapsed, 1),
                         "message": f"视频生成中：{text}（已用时 {round(elapsed)}s）",
+                        "next_action": f"视频正在生成中（进度 {text}），尚未完成。请等待 5-10 秒后继续调用 video_status(job_id='{job_id}') 检查进度。",
                     })
                     logger.info(f"Background job {job_id}: Progress {text} ({percent}%), elapsed {elapsed:.1f}s")
                     time.sleep(5)
@@ -515,15 +575,45 @@ def register_video_create_tool(mcp: FastMCP) -> None:
                 rename_name = video_name if video_name else f"video_{job_id[:8]}"
                 rename_success = edit_page.rename(rename_name)
                 
+                # Handle video download if requested
+                video_local_path = ""
+                download_warning = False
+                if download:
+                    local_path = edit_page.download_video(resolution=download, expected_prefix=rename_name, timeout=120)
+                    if local_path:
+                        video_local_path = local_path
+                    else:
+                        download_warning = True
+                        logger.warning(f"Failed or timed out downloading {download} video for job {job_id}")
+
                 edit_page.save_and_close()
                 
                 total_time = round(time.time() - t0, 1)
+
+                if not rename_success:
+                    status = "completed_with_rename_warning"
+                    msg = "视频生成成功，但重命名失败"
+                elif download_warning:
+                    status = "completed_with_download_warning"
+                    msg = f"视频生成成功，已重命名为 {rename_name}，但 {download} 下载超时或失败"
+                else:
+                    status = "completed"
+                    msg = f"视频生成成功，已重命名为 {rename_name}"
+                    if download and video_local_path:
+                        msg += f"，{download} 视频已下载至 {video_local_path}"
+
                 _video_jobs[job_id] = {
-                    "status": "completed" if rename_success else "completed_with_rename_warning",
                     "job_id": job_id,
-                    "message": f"视频生成成功，已重命名为 {rename_name}",
+                    "status": status,
+                    "is_finished": True,
+                    "progress": 100,
+                    "progress_percent": 100,
+                    "progress_text": "100%",
+                    "message": msg,
+                    "next_action": "任务已顺利完成，智能体请停止轮询，可直接向用户汇报视频链接及本地文件。",
                     "video_name": rename_name,
                     "video_url": video_url,
+                    "video_local_path": video_local_path,
                     "rename_success": rename_success,
                     "elapsed_seconds": total_time,
                     "details": {
@@ -536,18 +626,22 @@ def register_video_create_tool(mcp: FastMCP) -> None:
                         "resolution": resolution,
                         "duration": duration,
                         "quantity": quantity,
+                        "download": download,
                     }
                 }
-                logger.info(f"Video job {job_id} completed successfully in {total_time}s")
+                logger.info(f"Video job {job_id} completed with status {status} in {total_time}s")
 
             except Exception as e:
                 total_time = round(time.time() - t0, 1)
                 logger.error(f"Video job {job_id} failed: {e}")
                 _video_jobs[job_id] = {
-                    "status": "error",
                     "job_id": job_id,
+                    "status": "error",
+                    "is_finished": True,
                     "error": str(e),
+                    "message": f"视频生成任务失败: {str(e)}",
                     "elapsed_seconds": total_time,
+                    "next_action": "任务执行失败，智能体请停止轮询，可向用户汇报具体失败原因。"
                 }
 
         thread = threading.Thread(target=task_worker, daemon=True)
@@ -556,8 +650,10 @@ def register_video_create_tool(mcp: FastMCP) -> None:
         return json.dumps({
             "success": True,
             "status": "started",
+            "is_finished": False,
             "job_id": job_id,
-            "message": "视频创建任务已在后台启动，超时时间为 5 分钟 (300s)。请使用 video_status 工具轮询结果。",
+            "message": f"视频创建任务已在后台启动，超时时间为 5 分钟 (300s)。请调用 video_status(job_id='{job_id}') 轮询结果。",
+            "next_action": f"请等待 5-10 秒后调用 video_status(job_id='{job_id}') 查询进度，依据返回的 is_finished 字段判断是否完成。",
             "params": {
                 "project_id": project_id,
                 "prompt": prompt,
@@ -571,6 +667,7 @@ def register_video_create_tool(mcp: FastMCP) -> None:
                 "resolution": resolution,
                 "duration": duration,
                 "quantity": quantity,
+                "download": download,
             }
         }, ensure_ascii=False)
 
@@ -579,18 +676,30 @@ def register_video_status_tool(mcp: FastMCP) -> None:
     @mcp.tool()
     def video_status(job_id: str) -> str:
         """
-        Check the status and download link of a background video creation job.
+        查询 Google Flow 后台视频生成任务的当前状态与生成结果。
+        
+        【智能体调用与状态判定准则】
+        1. 核心结束判定依据：`is_finished` (bool)
+           - 当 `is_finished == False`：任务仍在后台生成处理中（处于 pending 或 generating 状态）。视频生成通常耗时 1~3 分钟，智能体【绝不能】停止轮询或向用户谎称已完成，必须等待 5~10 秒后继续调用本工具查询。
+           - 当 `is_finished == True`：任务已彻底完成或出错。智能体【必须停止轮询】，直接获取视频 URL、本地下载文件等数据向用户汇报。
+        2. `status` 状态枚举说明：
+           - 'pending': 任务排队中，正在初始化页面或配置参数（is_finished=False）。
+           - 'generating': 视频正在生成中，可查看 progress_text（如 '45%'）、progress_percent（数值 45）及 elapsed_seconds 已耗时（is_finished=False）。
+           - 'completed': 视频生成成功且重命名完成。若设置了 download，将返回 video_local_path 本地文件绝对路径（is_finished=True）。
+           - 'completed_with_rename_warning': 视频生成成功，但重命名未成功（is_finished=True）。
+           - 'completed_with_download_warning': 视频生成与重命名成功，但视频下载超时或失败（仍包含 video_url 线上链接）（is_finished=True）。
+           - 'error': 任务失败，详细原因见 error 字段（is_finished=True）。
+        3. 建议行动：直接参考返回的 `next_action` 字段进行下一步操作（继续轮询等待或汇报结果）。
         """
         if job_id not in _video_jobs:
             return json.dumps({
+                "job_id": job_id,
                 "status": "error",
-                "error": f"Job ID {job_id} not found."
+                "is_finished": True,
+                "error": f"未找到任务 ID: {job_id}。任务可能不存在或服务已重启。",
+                "message": f"未找到任务 ID: {job_id}。任务可能不存在或服务已重启。",
+                "next_action": "未找到任务记录，智能体请停止轮询，请核对 job_id 或重新发起任务。"
             }, ensure_ascii=False)
 
         state = _video_jobs[job_id]
-        if state.get("status") in ["completed", "completed_with_rename_warning", "error"]:
-            # Keep completed state in dictionary so repeated calls can still fetch download link if needed,
-            # or return current state
-            pass
-
         return json.dumps(state, ensure_ascii=False)

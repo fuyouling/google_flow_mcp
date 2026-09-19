@@ -1,5 +1,8 @@
+import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Mapping
 import yaml
 from loguru import logger
 
@@ -11,10 +14,28 @@ class BrowserFlagEntry:
     description: str = ""
 
 
-def load_browser_flags(config_path: str) -> list[str]:
+def _expand_env_vars(text: str, env_vars: Mapping[str, str] | None = None) -> str:
+    """Expand environment variables in text supporting ${VAR} and $VAR formats."""
+    merged = dict(os.environ)
+    if env_vars:
+        for k, v in env_vars.items():
+            if v is not None:
+                merged[k] = str(v)
+
+    def _sub(m: re.Match) -> str:
+        var_name = m.group(1) or m.group(2)
+        return merged.get(var_name, m.group(0))
+
+    return re.sub(r"\$\{([A-Za-z0-9_]+)\}|\$([A-Za-z0-9_]+)", _sub, text)
+
+
+def load_browser_flags(
+    config_path: str, env_vars: Mapping[str, str] | None = None
+) -> list[str]:
     """Load browser launch flags from YAML configuration file.
 
     Returns only flags where enabled is True.
+    Supports environment variable substitution (e.g. ${CHROME_DOWNLOAD_DIR}).
     """
     path = Path(config_path)
     if not path.exists():
@@ -36,11 +57,17 @@ def load_browser_flags(config_path: str) -> list[str]:
         try:
             item = BrowserFlagEntry(**entry)
             if item.enabled:
-                flags.append(item.flag)
-                logger.debug(f"Browser flag enabled: {item.flag} ({item.description})")
+                flag = _expand_env_vars(item.flag, env_vars)
+                # Skip if a variable placeholder evaluated to empty value
+                if flag.startswith("--default-download-directory=") and flag.split("=", 1)[1].strip() in ("", "''", '""'):
+                    logger.debug(f"Skipping empty download flag: {item.flag}")
+                    continue
+                flags.append(flag)
+                logger.debug(f"Browser flag enabled: {flag} ({item.description})")
             else:
                 logger.debug(f"Browser flag disabled: {item.flag}")
         except Exception as err:
             logger.warning(f"Skipping invalid browser flag entry {entry}: {err}")
 
     return flags
+

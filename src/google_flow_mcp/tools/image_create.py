@@ -81,22 +81,43 @@ def register_image_create_tool(mcp: FastMCP) -> None:
         image_name: Annotated[str, Field(description="生成后的图片重命名名称，留空则自动生成")] = "",
         aspect_ratio: Annotated[str, Field(description="图片宽高比，例如 '16:9' 或 '9:16'")] = "16:9",
         model_name: Annotated[str, Field(description="使用的模型名称")] = "Nano Banana Pro",
-        quantity: Annotated[int, Field(description="生成的图片数量，通常为 1-4")] = 1
+        quantity: Annotated[int, Field(description="生成的图片数量，通常为 1-4")] = 1,
+        download: Annotated[str, Field(description="可选下载分辨率，可选 '1K' 或 '2K'，留空则不下载")] = ""
     ) -> str:
         """
         在 Google Flow 中发起后台图片生成任务。
         
-        注意：
-        1. 此工具会在后台启动生成任务并立即返回一个 job_id。
-        2. 你**必须**使用 `image_status` 工具轮询该 job_id 以获取最终结果和生成的图片。
+        【重要执行规则与状态轮询机制】
+        1. 异步执行：本工具在后台异步启动图片生成任务，会立即返回任务启动信息及唯一 `job_id`，此时 `is_finished=False`。
+        2. 必须轮询：调用成功后，智能体【必须】使用返回的 `job_id` 定期调用 `image_status` 工具查询任务最新进度与最终结果。
+        3. 结束判定：智能体必须根据 `image_status` 返回的 `is_finished` 字段判定任务是否结束：
+           - 若 `is_finished == False`：表示任务正在生成中（可能处于 pending 或 generating 阶段），智能体【严禁】提前向用户宣称完成，必须等待 5 秒后继续调用 `image_status` 轮询。
+           - 若 `is_finished == True`：表示任务彻底结束（成功完成或发生异常），智能体方可停止轮询，并向用户展示生成的图片结果或错误说明。
         """
+        if download and download not in ("1K", "2K"):
+            return json.dumps({
+                "success": False,
+                "status": "error",
+                "is_finished": True,
+                "error": f"Invalid download resolution: {download!r}. Only '1K' and '2K' are supported.",
+                "message": f"不支持的下载分辨率: {download!r}。仅支持 '1K' 或 '2K'，留空则不下载。",
+                "next_action": "参数错误，任务未启动，智能体请修正 download 参数后重新调用。"
+            }, ensure_ascii=False)
+
         job_id = str(uuid.uuid4())
         _jobs[job_id] = {
+            "job_id": job_id,
             "status": "pending",
-            "message": "Image creation started in the background."
+            "is_finished": False,
+            "progress": 0,
+            "progress_percent": 0,
+            "progress_text": "0%",
+            "elapsed_seconds": 0,
+            "message": "图片生成任务已在后台启动，正在初始化页面及参数设置...",
+            "next_action": f"任务初始化中（尚未完成），请等待 5 秒后继续调用 image_status(job_id='{job_id}') 检查进度。"
         }
         
-        logger.info(f"Starting image_create background job {job_id}: project={project_id}")
+        logger.info(f"Starting image_create background job {job_id}: project={project_id}, download={download!r}")
         
         def task_worker():
             try:
@@ -257,11 +278,15 @@ def register_image_create_tool(mcp: FastMCP) -> None:
                 logger.info(f"Background job {job_id}: Clicked generate button.")
                 
                 _jobs[job_id] = {
+                    "job_id": job_id,
                     "status": "generating",
+                    "is_finished": False,
+                    "progress": 0,
                     "progress_percent": 0,
                     "progress_text": "0%",
                     "elapsed_seconds": 0,
-                    "message": "已点击生成，等待开始生成..."
+                    "message": "已点击生成，等待开始生成...",
+                    "next_action": f"任务已提交，等待开始生成，请等待 5 秒后继续调用 image_status(job_id='{job_id}') 检查进度。"
                 }
 
                 # 1. Wait for loading-percentage element to appear (up to 40s)
@@ -295,15 +320,23 @@ def register_image_create_tool(mcp: FastMCP) -> None:
                         break
 
                     text = els[0].text or ''
+                    import re as _re
+                    m = _re.search(r'(\d{1,3})', text)
+                    percent = int(m.group(1)) if m else 0
                         
                     elapsed = time.time() - start_time
                     _jobs[job_id].update({
+                        "job_id": job_id,
                         "status": "generating",
-                        "progress_text": text,
+                        "is_finished": False,
+                        "progress": percent,
+                        "progress_percent": percent,
+                        "progress_text": text if text else f"{percent}%",
                         "elapsed_seconds": round(elapsed, 1),
                         "message": f"图片生成中：{text}（已用时 {round(elapsed)}s）",
+                        "next_action": f"任务正在生成中（{text}），尚未完成。请等待 5 秒后继续调用 image_status(job_id='{job_id}') 检查进度。"
                     })
-                    logger.info(f"Background job {job_id}: Progress {text} , elapsed {elapsed:.1f}s")
+                    logger.info(f"Background job {job_id}: Progress {text} ({percent}%), elapsed {elapsed:.1f}s")
                     time.sleep(5)
                 else:
                     raise Exception(f"图片生成超时（超过 {total_timeout} 秒未完成）")
@@ -333,22 +366,64 @@ def register_image_create_tool(mcp: FastMCP) -> None:
                 img_url = edit_page.get_media_url()
                 b64_data = edit_page.get_base64()
                 
+                # Handle image download if requested
+                image_local_path = ""
+                download_warning = False
+                if download in ("1K", "2K"):
+                    local_path = edit_page.download_image(resolution=download, expected_prefix=rename_name)
+                    if local_path:
+                        image_local_path = local_path
+                    else:
+                        download_warning = True
+                        logger.warning(f"Failed or timed out downloading {download} image for job {job_id}")
+
                 edit_page.save_and_close()
                 
+                total_time = round(time.time() - start_time, 1)
+
+                if not rename_success:
+                    status = "completed_with_rename_warning"
+                    msg = "图片生成成功，但重命名失败"
+                elif download_warning:
+                    status = "completed_with_download_warning"
+                    msg = f"图片生成成功，已重命名为 {rename_name}，但 {download} 图片下载失败或超时"
+                else:
+                    status = "completed"
+                    msg = f"图片生成成功，已重命名为 {rename_name}"
+                    if download in ("1K", "2K") and image_local_path:
+                        msg += f"，{download} 图片已下载至 {image_local_path}"
+
                 _jobs[job_id] = {
-                    "status": "completed" if rename_success else "completed_with_rename_warning",
-                    "message": f"Image generated and renamed to {rename_name}" if rename_success else f"Image generated but rename failed.",
+                    "job_id": job_id,
+                    "status": status,
+                    "is_finished": True,
+                    "progress": 100,
+                    "progress_percent": 100,
+                    "progress_text": "100%",
+                    "elapsed_seconds": total_time,
+                    "message": msg,
+                    "next_action": "任务已顺利完成，智能体请停止轮询，可直接向用户展示图片结果及相关信息。",
                     "image_name": rename_name,
                     "image_url": img_url,
                     "image_base64": b64_data,
                     "base64": b64_data,
+                    "image_local_path": image_local_path,
                     "rename_success": rename_success
                 }
-                logger.info(f"Background job {job_id} completed successfully.")
+                logger.info(f"Background job {job_id} completed with status: {status}")
                 
             except Exception as e:
+                total_time = round(time.time() - start_time, 1) if 'start_time' in locals() else 0
                 logger.error(f"Background job {job_id} failed: {str(e)}")
-                _jobs[job_id] = {"status": "error", "error": str(e)}
+                _jobs[job_id] = {
+                    "job_id": job_id,
+                    "status": "error",
+                    "is_finished": True,
+                    "error": str(e),
+                    "message": f"图片生成任务失败: {str(e)}",
+                    "elapsed_seconds": total_time,
+                    "next_action": "任务执行失败，智能体请停止轮询，可向用户汇报具体失败原因。"
+                }
 
         thread = threading.Thread(target=task_worker, daemon=True)
         thread.start()
@@ -356,21 +431,40 @@ def register_image_create_tool(mcp: FastMCP) -> None:
         return json.dumps({
             "success": True,
             "status": "started",
+            "is_finished": False,
             "job_id": job_id,
-            "message": "Job is running in background. Poll using image_status tool."
+            "message": f"图片生成任务已在后台启动。请调用 image_status(job_id='{job_id}') 轮询任务状态（建议每 5 秒轮询一次）。",
+            "next_action": f"请等待 5 秒后调用 image_status(job_id='{job_id}') 查询任务进度，依据返回的 is_finished 字段判断是否完成。"
         }, ensure_ascii=False)
 
 def register_image_status_tool(mcp: FastMCP) -> None:
     @mcp.tool()
     def image_status(job_id: str) -> str:
         """
-        Check the status of a background image creation job.
+        查询 Google Flow 后台图片生成任务的当前状态与生成结果。
+        
+        【智能体调用与状态判定准则】
+        1. 核心结束判定依据：`is_finished` (bool)
+           - 当 `is_finished == False`：任务仍在后台处理中（处于 pending 或 generating 状态）。智能体【绝不能】停止轮询，必须等待 5 秒后继续调用本工具查询。
+           - 当 `is_finished == True`：任务已彻底完成或出错。智能体【必须停止轮询】，直接获取结果数据向用户汇报。
+        2. `status` 状态枚举说明：
+           - 'pending': 任务排队中，正在初始化页面或配置参数（is_finished=False）。
+           - 'generating': 图片正在生成中，可查看 progress_text / progress_percent（is_finished=False）。
+           - 'completed': 图片生成成功且重命名完成（is_finished=True）。
+           - 'completed_with_rename_warning': 图片生成成功，但重命名未成功（is_finished=True）。
+           - 'completed_with_download_warning': 图片生成成功，但高清图片下载超时或失败（is_finished=True）。
+           - 'error': 任务失败，详细原因见 error 字段（is_finished=True）。
+        3. 建议行动：直接参考返回的 `next_action` 字段进行下一步操作。
         """
         if job_id not in _jobs:
-            return json.dumps({"error": f"Job ID {job_id} not found."})
-            
+            return json.dumps({
+                "job_id": job_id,
+                "status": "error",
+                "is_finished": True,
+                "error": f"未找到任务 ID: {job_id}。任务可能不存在或服务已重启。",
+                "message": f"未找到任务 ID: {job_id}。任务可能不存在或服务已重启。",
+                "next_action": "未找到任务记录，智能体请停止轮询，请核对 job_id 或重新发起任务。"
+            }, ensure_ascii=False)
+
         state = _jobs[job_id]
-        if state.get("status") in ["completed", "error"]:
-            del _jobs[job_id]
-            
         return json.dumps(state, ensure_ascii=False)

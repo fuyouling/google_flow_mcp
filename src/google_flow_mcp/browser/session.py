@@ -31,6 +31,17 @@ def _build_options(settings) -> ChromiumOptions:
     if settings.chrome_profile_directory:
         options.set_argument(f"--profile-directory={settings.chrome_profile_directory}")
 
+    # Chrome default download directory
+    if settings.chrome_download_dir:
+        download_path = Path(settings.chrome_download_dir)
+        download_path.mkdir(parents=True, exist_ok=True)
+        options.set_download_path(str(download_path))
+        options.set_argument("--default-download-directory", str(download_path))
+        options.set_pref("download.default_directory", str(download_path))
+        options.set_pref("savefile.default_directory", str(download_path))
+        options.set_pref("download.prompt_for_download", False)
+        logger.info(f"Browser download directory configured: {download_path}")
+
     # Chrome binary path (optional, empty = auto-detect by DrissionPage)
     if settings.chrome_binary_path:
         binary = Path(settings.chrome_binary_path)
@@ -44,7 +55,12 @@ def _build_options(settings) -> ChromiumOptions:
         options.set_proxy(settings.proxy_server)
 
     # Load flags from YAML
-    flags = load_browser_flags(settings.browser_config_path)
+    env_vars = {
+        "CHROME_DOWNLOAD_DIR": settings.chrome_download_dir,
+        "CHROME_USER_DATA_DIR": settings.chrome_user_data_dir,
+        "CHROME_PROFILE_DIRECTORY": settings.chrome_profile_directory,
+    }
+    flags = load_browser_flags(settings.browser_config_path, env_vars=env_vars)
     for flag in flags:
         options.set_argument(flag)
         if flag.startswith("--headless"):
@@ -108,7 +124,9 @@ def get_browser() -> Chromium:
                     time.sleep(1)
                     continue
                 
-                with open("/home/ubuntu/google_flow_mcp/scratch/mcp_error.log", "w") as f:
+                from google_flow_mcp.config import PROJECT_ROOT
+                err_log_path = PROJECT_ROOT / "mcp_error.log"
+                with open(err_log_path, "w", encoding="utf-8") as f:
                     f.write(f"Exception Type: {type(e).__name__}\n")
                     f.write(f"Exception Message: {str(e)}\n")
                     f.write("Traceback:\n")

@@ -89,7 +89,8 @@ uv run google-flow-mcp
       ],
       "env": {
         "CHROME_USER_DATA_DIR": "/path/to/google_flow_mcp/chrome_data",
-        "CHROME_PROFILE_DIRECTORY": "Default"
+        "CHROME_PROFILE_DIRECTORY": "Default",
+        "CHROME_DOWNLOAD_DIR": "/path/to/google_flow_mcp/downloads"
       }
     }
   }
@@ -113,7 +114,8 @@ uv run google-flow-mcp
       ],
       "env": {
         "CHROME_USER_DATA_DIR": "/path/to/google_flow_mcp/chrome_data",
-        "CHROME_PROFILE_DIRECTORY": "Default"
+        "CHROME_PROFILE_DIRECTORY": "Default",
+        "CHROME_DOWNLOAD_DIR": "/path/to/google_flow_mcp/downloads"
       }
     }
   }

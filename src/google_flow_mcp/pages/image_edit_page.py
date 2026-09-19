@@ -1,6 +1,8 @@
+import time
+from pathlib import Path
 from loguru import logger
 from google_flow_mcp.pages.base_page import BasePage
-import time
+from google_flow_mcp.config import get_settings
 
 class ImageEditPage(BasePage):
     """
@@ -101,10 +103,123 @@ class ImageEditPage(BasePage):
             
         return ""
 
+    def download_image(self, resolution: str = "2K", expected_prefix: str = "", timeout: int = 60) -> str | None:
+        """
+        Download the image in specified resolution ('1K' or '2K') and wait for completion.
+
+        Args:
+            resolution: Target resolution, strictly '1K' or '2K'.
+            expected_prefix: The prefix of the file name (usually the renamed image title).
+            timeout: Max seconds to wait for download to complete.
+
+        Returns:
+            The absolute path of the downloaded file as a string, or None if failed or timed out.
+        """
+        if resolution not in ("1K", "2K"):
+            logger.warning(f"Unsupported download resolution: {resolution}. Only '1K' and '2K' are allowed.")
+            return None
+
+        settings = get_settings()
+        download_dir_str = settings.chrome_download_dir
+        if not download_dir_str:
+            logger.warning("CHROME_DOWNLOAD_DIR is not configured in settings!")
+            return None
+
+        download_path = Path(download_dir_str)
+        download_path.mkdir(parents=True, exist_ok=True)
+
+        existing_files = set(download_path.iterdir())
+        start_time = time.time()
+
+        logger.info(f"Initiating {resolution} image download, expected prefix: {expected_prefix!r}")
+
+        # 1. Click download button: //button[@aria-label="下载媒体内容"]
+        download_btn = self.tab.ele('xpath://button[@aria-label="下载媒体内容"]', timeout=5)
+        if not download_btn:
+            logger.warning("Download button (//button[@aria-label='下载媒体内容']) not found on edit page!")
+            return None
+
+        try:
+            download_btn.click()
+            time.sleep(1)
+        except Exception as e:
+            logger.warning(f"Failed to click download button: {e}")
+            try:
+                download_btn.click(by_js=True)
+                time.sleep(1)
+            except Exception as e2:
+                logger.error(f"Failed to click download button via JS: {e2}")
+                return None
+
+        # 2. Click resolution button: //span[text()="{resolution}"]
+        res_btn = self.tab.ele(f'xpath://span[text()="{resolution}"]', timeout=5)
+        if not res_btn:
+            res_btn = self.tab.ele(f'xpath://button[contains(., "{resolution}")]', timeout=2)
+
+        if not res_btn:
+            logger.warning(f"Resolution button for '{resolution}' not found!")
+            return None
+
+        try:
+            res_btn.click()
+            logger.info(f"Clicked resolution option: {resolution}")
+        except Exception as e:
+            logger.warning(f"Failed to click resolution button: {e}")
+            try:
+                res_btn.click(by_js=True)
+                logger.info(f"Clicked resolution option via JS: {resolution}")
+            except Exception as e2:
+                logger.error(f"Failed to click resolution button via JS: {e2}")
+                return None
+
+        # 3. Wait for file download to complete
+        logger.info(f"Waiting up to {timeout}s for file starting with '{expected_prefix}' in {download_path}...")
+        poll_interval = 1
+        while time.time() - start_time < timeout:
+            time.sleep(poll_interval)
+            try:
+                current_files = list(download_path.iterdir())
+            except Exception as e:
+                logger.warning(f"Error scanning download directory: {e}")
+                continue
+
+            for file in current_files:
+                if not file.is_file():
+                    continue
+
+                fname = file.name
+                matches_prefix = fname.startswith(expected_prefix) if expected_prefix else True
+                if not matches_prefix:
+                    continue
+
+                # Ignore unfinished temporary download files
+                if fname.endswith('.crdownload') or fname.endswith('.tmp'):
+                    continue
+
+                # Ensure it's a new or updated file
+                if file not in existing_files:
+                    try:
+                        if file.stat().st_size > 0:
+                            logger.info(f"Download complete: {file.resolve()}")
+                            return str(file.resolve())
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        stat = file.stat()
+                        if stat.st_mtime >= start_time - 1 and stat.st_size > 0:
+                            logger.info(f"Download complete (updated file): {file.resolve()}")
+                            return str(file.resolve())
+                    except Exception:
+                        pass
+
+        logger.warning(f"Download timed out after {timeout}s waiting for file with prefix '{expected_prefix}'")
+        return None
+
     def save_and_close(self):
         """Click the Done/Save button to close the edit view."""
         logger.info("Attempting to click Done/Save button")
-        done_btn = self.tab.ele('xpath://button[@aria-label="完成场景编辑"]', timeout=5)
+        done_btn = self.tab.ele('xpath://button[@aria-label="完成修改"]', timeout=5)
         if done_btn:
             done_btn.click()
             time.sleep(1)
