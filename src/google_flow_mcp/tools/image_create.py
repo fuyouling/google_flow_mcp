@@ -10,8 +10,10 @@ from mcp.server.fastmcp import FastMCP
 from google_flow_mcp.browser.session import get_browser
 from google_flow_mcp.models.project_cache import ProjectCache
 
-# Global dictionary to store background job status
-_jobs = {}
+from google_flow_mcp.tasks.manager import task_manager
+
+# Reference to global jobs dictionary for backward compatibility
+_jobs = task_manager.jobs
 
 def apply_image_settings(page, aspect_ratio="16:9", model_name="Nano Banana Pro", quantity="x1"):
     # Wait for the page to be ready
@@ -88,11 +90,12 @@ def register_image_create_tool(mcp: FastMCP) -> None:
         在 Google Flow 中发起后台图片生成任务。
         
         【重要执行规则与状态轮询机制】
-        1. 异步执行：本工具在后台异步启动图片生成任务，会立即返回任务启动信息及唯一 `job_id`，此时 `is_finished=False`。
+        1. 异步执行与全局队列：本工具在后台异步执行生成任务。由于浏览器单一，全服务所有生成任务（涵盖图片/视频/角色）共用全局单任务队列串行执行。若当前空闲则立即启动（status='started'）；若已有任务在生成中，将自动进入全局 FIFO 排队队列（status='queued'），前置任务完成后自动顺序执行。智能体【严禁】因看到 queued 而重复调用创建工具！
         2. 必须轮询：调用成功后，智能体【必须】使用返回的 `job_id` 定期调用 `image_status` 工具查询任务最新进度与最终结果。
         3. 结束判定：智能体必须根据 `image_status` 返回的 `is_finished` 字段判定任务是否结束：
-           - 若 `is_finished == False`：表示任务正在生成中（可能处于 pending 或 generating 阶段），智能体【严禁】提前向用户宣称完成，必须等待 5 秒后继续调用 `image_status` 轮询。
+           - 若 `is_finished == False`：表示任务正在排队中（queued）或正在生成中（pending/generating），智能体【严禁】提前向用户宣称完成，必须等待 5 秒后继续调用 `image_status` 轮询。
            - 若 `is_finished == True`：表示任务彻底结束（成功完成或发生异常），智能体方可停止轮询，并向用户展示生成的图片结果或错误说明。
+        4. 全局查看与取消：可随时调用 `task_queue_status` 工具查看全局排队概览；使用 `task_cancel(job_id)` 可取消排队或中断任务。
         """
         if download and download not in ("1K", "2K"):
             return json.dumps({
@@ -425,17 +428,20 @@ def register_image_create_tool(mcp: FastMCP) -> None:
                     "next_action": "任务执行失败，智能体请停止轮询，可向用户汇报具体失败原因。"
                 }
 
-        thread = threading.Thread(target=task_worker, daemon=True)
-        thread.start()
-        
-        return json.dumps({
-            "success": True,
-            "status": "started",
-            "is_finished": False,
-            "job_id": job_id,
-            "message": f"图片生成任务已在后台启动。请调用 image_status(job_id='{job_id}') 轮询任务状态（建议每 5 秒轮询一次）。",
-            "next_action": f"请等待 5 秒后调用 image_status(job_id='{job_id}') 查询任务进度，依据返回的 is_finished 字段判断是否完成。"
-        }, ensure_ascii=False)
+        submit_res = task_manager.submit_task(
+            task_type="image",
+            job_id=job_id,
+            initial_state=_jobs[job_id],
+            worker_fn=task_worker,
+            project_id=project_id,
+            task_name=image_name or f"image_{job_id[:8]}"
+        )
+        if submit_res.get("status") == "started":
+            submit_res.update({
+                "message": f"图片生成任务已在后台启动。请调用 image_status(job_id='{job_id}') 轮询任务状态（建议每 5 秒轮询一次）。",
+                "next_action": f"请等待 5 秒后调用 image_status(job_id='{job_id}') 查询任务进度，依据返回的 is_finished 字段判断是否完成。"
+            })
+        return json.dumps(submit_res, ensure_ascii=False)
 
 def register_image_status_tool(mcp: FastMCP) -> None:
     @mcp.tool()
@@ -456,15 +462,5 @@ def register_image_status_tool(mcp: FastMCP) -> None:
            - 'error': 任务失败，详细原因见 error 字段（is_finished=True）。
         3. 建议行动：直接参考返回的 `next_action` 字段进行下一步操作。
         """
-        if job_id not in _jobs:
-            return json.dumps({
-                "job_id": job_id,
-                "status": "error",
-                "is_finished": True,
-                "error": f"未找到任务 ID: {job_id}。任务可能不存在或服务已重启。",
-                "message": f"未找到任务 ID: {job_id}。任务可能不存在或服务已重启。",
-                "next_action": "未找到任务记录，智能体请停止轮询，请核对 job_id 或重新发起任务。"
-            }, ensure_ascii=False)
-
-        state = _jobs[job_id]
+        state = task_manager.get_task_status(job_id)
         return json.dumps(state, ensure_ascii=False)

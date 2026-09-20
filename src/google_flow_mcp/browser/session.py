@@ -77,7 +77,7 @@ def get_browser() -> Chromium:
     if _page is not None:
         try:
             # Check if browser is still responsive
-            _ = _page.browser.version
+            _ = _page.version
         except Exception as e:
             logger.warning(f"Existing browser instance disconnected ({e}). Re-initializing...")
             _page = None
@@ -143,10 +143,21 @@ def set_browser(browser: Chromium | None) -> None:
     _page = browser
 
 
-def close_browser() -> None:
-    """Close and release the global browser instance."""
+def close_browser(force: bool = False) -> None:
+    """Close and release the global browser instance.
+    
+    If the browser instance was connected to an already running external browser
+    (_is_exists=True) and force is False, the browser process will NOT be terminated,
+    only the local session reference will be released.
+    """
     global _page
     if _page:
+        is_external = getattr(_page, "_is_exists", False)
+        if is_external and not force:
+            logger.info("External persistent browser instance detected (_is_exists=True). Preserving browser process and releasing session reference.")
+            _page = None
+            return
+
         logger.info("Closing browser...")
         try:
             _page.quit()

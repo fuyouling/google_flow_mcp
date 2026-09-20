@@ -8,24 +8,34 @@
 """
 
 import asyncio
+import io
 import json
+import sys
 import time
+from pathlib import Path
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+
+# ── 编码修复（Windows GBK 终端） ──────────────────────────────
+if sys.stdout.encoding and sys.stdout.encoding.lower() in ("gbk", "gb2312", "cp936"):
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 # ── 测试参数 ─────────────────────────────────────────────
 PROJECT_ID   = "41ffbc19-48f6-44c0-8b2a-4745e26ddc74"  # qqqq
 PROMPT       = "Mary Lennox 和 Officer Barney 正在吃饭"
-IMAGE_NAME   = "SE_03"
+IMAGE_NAME   = "SE_06"
 ASSETS       = "Mary Lennox,Officer Barney"
 ASPECT_RATIO = "16:9"
 MODEL_NAME   = "Nano Banana Pro"
 QUANTITY     = 1
 # ─────────────────────────────────────────────────────────
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
 SERVER_PARAMS = StdioServerParameters(
     command="uv",
-    args=["--directory", "/home/ubuntu/google_flow_mcp", "run", "google-flow-mcp"],
+    args=["--directory", str(PROJECT_ROOT), "run", "google-flow-mcp"],
 )
 
 

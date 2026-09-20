@@ -1,9 +1,13 @@
+import time
+import base64
+import shutil
+from pathlib import Path
 from loguru import logger
 from DrissionPage import ChromiumPage
 from DrissionPage.common import Keys
 from google_flow_mcp.pages.base_page import BasePage
-import time
-import base64
+from google_flow_mcp.config import get_settings
+
 
 class FlowCharacterPage(BasePage):
     """
@@ -279,6 +283,255 @@ class FlowCharacterPage(BasePage):
             
         return self._wait_for_generation_complete()
 
+    def upload_portrait(self, portrait_path: str, timeout: int = 30) -> bool:
+        """
+        Upload character portrait image file.
+        Uses DrissionPage CDP file chooser interception to avoid OS native file dialogs.
+        Handles agreement dialog ('我同意，不再显示') and waits for upload completion
+        (detected via '//button[@aria-label="下载图片"]').
+        """
+        path_obj = Path(portrait_path)
+        if not path_obj.is_file():
+            raise FileNotFoundError(f"Portrait image file not found: {portrait_path}")
+
+        abs_path = str(path_obj.resolve())
+        logger.info(f"Initiating portrait upload for file: {abs_path}")
+
+        # Set file to be uploaded via CDP interception before clicking button
+        self.tab.set.upload_files(abs_path)
+
+        # Locate and click the upload button: //span[text()="上传"]
+        upload_btn = self.tab.ele('xpath://span[text()="上传"]', timeout=5)
+        if not upload_btn:
+            upload_btn = self.tab.ele('xpath://button[contains(., "上传")] | //span[contains(text(), "上传")]', timeout=2)
+        if not upload_btn:
+            raise Exception("Could not find portrait Upload button (//span[text()='上传']).")
+
+        try:
+            upload_btn.click()
+        except Exception as e:
+            logger.warning(f"Direct click on portrait upload button failed: {e}, attempting JS click...")
+            upload_btn.click(by_js=True)
+
+        logger.info(f"Waiting up to {timeout}s for portrait upload to complete...")
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            # Check for agreement popup ('此视频的使用权' dialog: //span[text()="我同意，不再显示"])
+            agree_btn = self.tab.ele('xpath://span[text()="我同意，不再显示"]', timeout=0)
+            if not agree_btn:
+                agree_btn = self.tab.ele('xpath://button[contains(., "我同意") or .//span[contains(text(), "我同意")]]', timeout=0)
+            if agree_btn:
+                logger.info("Detected agreement dialog, clicking '我同意，不再显示'...")
+                try:
+                    agree_btn.click()
+                except Exception as e:
+                    agree_btn.click(by_js=True)
+                time.sleep(1)
+
+            # Check if download button appears indicating upload completed
+            dl_btn = self.tab.ele('xpath://button[@aria-label="下载图片"]', timeout=0.5)
+            if dl_btn:
+                logger.info("Portrait upload completed successfully! Download button detected.")
+                time.sleep(1)
+                return True
+
+            time.sleep(1)
+
+        raise TimeoutError(f"Timeout ({timeout}s) waiting for portrait upload completion (download button not found).")
+
+    def upload_fullbody(self, fullbody_path: str, timeout: int = 30) -> bool:
+        """
+        Upload character fullbody image file.
+        Clicks Fullbody tab/button, intercepts file chooser dialog,
+        handles agreement dialog, and waits for upload completion.
+        """
+        path_obj = Path(fullbody_path)
+        if not path_obj.is_file():
+            raise FileNotFoundError(f"Fullbody image file not found: {fullbody_path}")
+
+        abs_path = str(path_obj.resolve())
+        logger.info(f"Initiating fullbody upload for file: {abs_path}")
+
+        # Step 5: Click Fullbody button/tab
+        logger.info("Clicking Fullbody button/tab...")
+        fullbody_btn = self.tab.ele('xpath://button[contains(., "全身像") or contains(., "full body")] | //span[contains(text(), "全身像")]', timeout=5)
+        if fullbody_btn:
+            try:
+                fullbody_btn.click(by_js=True)
+            except Exception as e:
+                logger.warning(f"JS click on fullbody button failed: {e}, attempting regular click...")
+                fullbody_btn.click()
+            time.sleep(1.5)
+        else:
+            logger.warning("Could not find Fullbody button/tab. Continuing to look for fullbody upload button...")
+
+        # Count existing download buttons prior to fullbody upload
+        existing_dl_btns = self.tab.eles('xpath://button[@aria-label="下载图片"]')
+        initial_dl_count = len(existing_dl_btns) if existing_dl_btns else 0
+
+        # Set upload file via CDP interception
+        self.tab.set.upload_files(abs_path)
+
+        # Step 6: Locate and click Upload button in fullbody area
+        upload_btn = self.tab.ele('xpath://span[text()="上传"] | //span[contains(text(), "上传")]', timeout=5)
+        if not upload_btn:
+            upload_btn = self.tab.ele('xpath://button[contains(., "上传")]', timeout=2)
+        if not upload_btn:
+            raise Exception("Could not find fullbody Upload button (//span[contains(text(), '上传')]).")
+
+        try:
+            upload_btn.click()
+        except Exception as e:
+            logger.warning(f"Direct click on fullbody upload button failed: {e}, attempting JS click...")
+            upload_btn.click(by_js=True)
+
+        logger.info(f"Waiting up to {timeout}s for fullbody upload to complete...")
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            # Check for agreement popup
+            agree_btn = self.tab.ele('xpath://span[text()="我同意，不再显示"]', timeout=0)
+            if not agree_btn:
+                agree_btn = self.tab.ele('xpath://button[contains(., "我同意") or .//span[contains(text(), "我同意")]]', timeout=0)
+            if agree_btn:
+                logger.info("Detected agreement dialog, clicking '我同意，不再显示'...")
+                try:
+                    agree_btn.click()
+                except Exception as e:
+                    agree_btn.click(by_js=True)
+                time.sleep(1)
+
+            # Check if a new download button appeared, or if at least one exists
+            current_dl_btns = self.tab.eles('xpath://button[@aria-label="下载图片"]')
+            current_dl_count = len(current_dl_btns) if current_dl_btns else 0
+            if current_dl_count > initial_dl_count or (initial_dl_count == 0 and current_dl_count > 0):
+                logger.info("Fullbody upload completed successfully! Download button detected.")
+                time.sleep(1)
+                return True
+
+            time.sleep(1)
+
+        raise TimeoutError(f"Timeout ({timeout}s) waiting for fullbody upload completion.")
+
+    def download_character_image(self, target_stem: str, timeout: int = 60) -> str | None:
+        """
+        Click the download image button (//button[@aria-label="下载图片"]),
+        wait for the downloaded file (starts with '图片'),
+        and rename it to f"{target_stem}{ext}", overwriting if already exists.
+
+        Args:
+            target_stem: Target filename without extension (e.g. "Alice_Portrait" or "Alice_Fullbody").
+            timeout: Maximum seconds to wait for download to finish.
+
+        Returns:
+            The absolute path of the renamed file as a string, or None if failed or timed out.
+        """
+        settings = get_settings()
+        download_dir_str = settings.chrome_download_dir
+        if download_dir_str:
+            download_path = Path(download_dir_str)
+        else:
+            download_path = Path.home() / "Downloads"
+
+        try:
+            download_path.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            logger.warning(f"Failed to ensure download directory {download_path}: {e}")
+
+        try:
+            existing_files = set(download_path.iterdir())
+        except Exception as e:
+            logger.warning(f"Failed to list files in download directory {download_path}: {e}")
+            existing_files = set()
+
+        start_time = time.time()
+        logger.info(f"Initiating character image download for '{target_stem}' into {download_path}...")
+
+        # 1. Locate and click download button: //button[@aria-label="下载图片"]
+        download_btn = self.tab.ele('xpath://button[@aria-label="下载图片"]', timeout=5)
+        if not download_btn:
+            logger.warning("Download button (//button[@aria-label='下载图片']) not found!")
+            return None
+
+        try:
+            download_btn.click()
+            time.sleep(1)
+        except Exception as e:
+            logger.warning(f"Direct click on download button failed: {e}, attempting JS click...")
+            try:
+                download_btn.click(by_js=True)
+                time.sleep(1)
+            except Exception as e2:
+                logger.error(f"JS click on download button failed: {e2}")
+                return None
+
+        # 2. Wait for downloaded file to appear
+        logger.info(f"Waiting up to {timeout}s for downloaded image starting with '图片' in {download_path}...")
+        poll_interval = 1
+        downloaded_file = None
+
+        while time.time() - start_time < timeout:
+            time.sleep(poll_interval)
+            try:
+                current_files = list(download_path.iterdir())
+            except Exception as e:
+                logger.warning(f"Error scanning download directory: {e}")
+                continue
+
+            for file in current_files:
+                if not file.is_file():
+                    continue
+
+                fname = file.name
+                if fname.endswith('.crdownload') or fname.endswith('.tmp'):
+                    continue
+
+                if not fname.startswith("图片"):
+                    continue
+
+                if file not in existing_files:
+                    try:
+                        if file.stat().st_size > 0:
+                            downloaded_file = file
+                            break
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        stat = file.stat()
+                        if stat.st_mtime >= start_time - 1 and stat.st_size > 0:
+                            downloaded_file = file
+                            break
+                    except Exception:
+                        pass
+
+            if downloaded_file:
+                break
+
+        if not downloaded_file:
+            logger.warning(f"Download timed out after {timeout}s waiting for file starting with '图片'")
+            return None
+
+        # 3. Rename to target_stem + ext (overwriting if target exists)
+        ext = downloaded_file.suffix or ".png"
+        target_file = download_path / f"{target_stem}{ext}"
+        try:
+            if target_file.exists():
+                target_file.unlink()
+            downloaded_file.rename(target_file)
+            logger.info(f"Character image downloaded and renamed successfully: {target_file.resolve()}")
+            return str(target_file.resolve())
+        except Exception as e:
+            logger.warning(f"Failed to rename downloaded file {downloaded_file} directly: {e}, falling back to shutil.move")
+            try:
+                if target_file.exists():
+                    target_file.unlink()
+                shutil.move(str(downloaded_file), str(target_file))
+                logger.info(f"Character image moved successfully via shutil: {target_file.resolve()}")
+                return str(target_file.resolve())
+            except Exception as e2:
+                logger.error(f"shutil.move also failed: {e2}")
+                return str(downloaded_file.resolve())
+
     def save_character(self):
         """Step 8: Save character (Click Done)."""
         logger.info("Saving character...")
@@ -290,3 +543,70 @@ class FlowCharacterPage(BasePage):
             return True
         logger.warning("Could not find Done/Save button.")
         return False
+
+    def list_characters(self, project_id: str = "") -> list:
+        """
+        List all characters in the current or specified project.
+        Extracts character count, name, and thumbnail image URL.
+        """
+        logger.info(f"Listing characters (project_id='{project_id}')...")
+        if project_id:
+            current_url = self.tab.url or ""
+            if f"/project/{project_id}" not in current_url:
+                project_url = f"https://flow.google.com/project/{project_id}"
+                logger.info(f"Navigating to project {project_id} ({project_url})...")
+                self.tab.get(project_url)
+                time.sleep(3)
+
+        # Check if we need to click the '角色' (Characters) tab/button
+        current_url = self.tab.url or ""
+        # If already on character page or character tile is present, we might already be on the page
+        has_tiles = self.tab.ele('xpath://div[@class="character-tile-container"]', timeout=1) or \
+                    self.tab.ele('xpath://div[contains(@class, "character-tile-container")]', timeout=0)
+        
+        if not has_tiles and not current_url.endswith("/character"):
+            logger.info("Looking for '角色' button in sidebar/navigation...")
+            # Try exact xpath first
+            char_btn = self.tab.ele('xpath://mat-list-item//span[text()="角色"]', timeout=2)
+            if not char_btn:
+                # Fallback to broader match
+                char_btn = self.tab.ele('xpath://mat-list-item[.//span[contains(text(), "角色") or contains(text(), "Character")]]', timeout=2)
+            if not char_btn:
+                # Direct span or button fallback
+                char_btn = self.tab.ele('xpath://button[contains(., "角色") or contains(., "Character")]', timeout=1)
+
+            if char_btn:
+                logger.info("Clicking '角色' button...")
+                char_btn.click()
+                time.sleep(2)
+            else:
+                logger.warning("Character navigation button not found; attempting to check current page directly.")
+
+        # Wait briefly for character tiles or empty list to appear
+        self.tab.ele('xpath://div[contains(@class, "character-tile-container")]', timeout=3)
+        
+        tiles = self.tab.eles('xpath://div[@class="character-tile-container"]')
+        if not tiles:
+            tiles = self.tab.eles('xpath://div[contains(@class, "character-tile-container")]')
+
+        characters = []
+        for idx, tile in enumerate(tiles):
+            # Name: xpath //div[@class="character-tile-container"]/span
+            name_ele = tile.ele('xpath:.//span', timeout=0)
+            name = name_ele.text.strip() if name_ele else ""
+            if not name:
+                name = tile.text.strip()
+
+            # Thumbnail
+            img_ele = tile.ele('css:img', timeout=0)
+            thumbnail_url = img_ele.attr('src') if img_ele else ""
+
+            char_info = {
+                "index": idx + 1,
+                "name": name,
+                "thumbnail_url": thumbnail_url
+            }
+            characters.append(char_info)
+
+        logger.info(f"Found {len(characters)} characters in project.")
+        return characters

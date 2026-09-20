@@ -9,8 +9,10 @@ from mcp.server.fastmcp import FastMCP
 
 from google_flow_mcp.browser.session import get_browser
 
-# Global dictionary to store background video job status
-_video_jobs = {}
+from google_flow_mcp.tasks.manager import task_manager
+
+# Reference to global jobs dictionary for backward compatibility
+_video_jobs = task_manager.jobs
 
 
 def apply_video_settings(
@@ -288,11 +290,11 @@ def register_video_create_tool(mcp: FastMCP) -> None:
         project_id: Annotated[str, Field(description="Google Flow 项目的唯一 ID，视频将创建在该项目内")],
         prompt: Annotated[str, Field(description="视频生成的提示词 (Prompt)，详细描述视频画面、主体动作、镜头运镜及光影风格")],
         video_name: Annotated[str, Field(description="生成的视频重命名名称，便于在项目素材库中检索与引用。留空则自动生成随机名称")] = "",
-        model_name: Annotated[str, Field(description="生成视频的模型名称。可选: 'Omni 1.1 Flash' (支持调节分辨率与时长), 'Veo 3.1 - Lite', 'Veo 3.1 - Fast', 'Veo 3.1 - Quality' (电影级高画质与运镜)")] = "Omni 1.1 Flash",
-        mode: Annotated[str, Field(description="生成模式: 'frame' (首尾帧模式，需提供 start_frame 和 end_frame) 或 'asset' (素材参考/纯文本模式，可提供 assets，若 assets 留空则为纯文生视频)")] = "frame",
-        start_frame: Annotated[str, Field(description="[仅帧模式] 首帧图片名称，必须为该项目中已存在的图片资源")] = "",
-        end_frame: Annotated[str, Field(description="[仅帧模式] 尾帧图片名称，必须为该项目中已存在的图片资源")] = "",
-        assets: Annotated[str, Field(description="[仅素材模式] 逗号分隔的参考素材名称列表(项目中已有资源)。若留空则表示纯文本生视频")] = "",
+        model_name: Annotated[str, Field(description="生成视频的模型名称。可选: 'Omni 1.1 Flash' (支持调节分辨率与时长，支持在素材模式下引用参考素材), 'Veo 3.1 - Lite', 'Veo 3.1 - Fast', 'Veo 3.1 - Quality' (电影级高画质与运镜；【极重要限制】Veo 模型除了帧模式可添加首帧与尾帧之外，不能再添加其它素材作为参考；在素材模式时添加素材作为参考，Veo 模型不会引用，引用素材请选择 Omni 模型)")] = "Omni 1.1 Flash",
+        mode: Annotated[str, Field(description="生成模式: 'frame' (首尾帧模式，需提供 start_frame 和 end_frame，Veo 与 Omni 均支持) 或 'asset' (素材参考/纯文本模式，若 assets 留空则为纯文生视频；若提供 assets，仅 Omni 模型支持引用素材，Veo 模型在素材模式下不会引用参考素材)")] = "frame",
+        start_frame: Annotated[str, Field(description="[仅帧模式] 首帧图片名称，必须为该项目中已存在的图片资源 (Veo 和 Omni 均支持添加首帧)")] = "",
+        end_frame: Annotated[str, Field(description="[仅帧模式] 尾帧图片名称，必须为该项目中已存在的图片资源 (Veo 和 Omni 均支持添加尾帧)")] = "",
+        assets: Annotated[str, Field(description="[仅素材模式] 逗号分隔的参考素材名称列表(项目中已有资源)。【重要限制】仅 Omni 1.1 Flash 模型支持引用素材生视频；Veo 系列模型在素材模式下添加素材不会被模型引用，若使用 Veo 模型请将 assets 留空作纯文生视频，若需引用素材作为参考请使用 Omni 1.1 Flash 模型")] = "",
         aspect_ratio: Annotated[str, Field(description="视频宽高比: '16:9' (横屏，适用于桌面/影视) 或 '9:16' (竖屏，适用于移动端短视频)")] = "16:9",
         resolution: Annotated[str, Field(description="视频分辨率 (仅 Omni 1.1 Flash 模型生效): 可选 '360p' 或 '720p'")] = "720p",
         duration: Annotated[int, Field(description="视频时长，单位为秒 (仅 Omni 1.1 Flash 模型生效): 例如 8")] = 8,
@@ -304,27 +306,32 @@ def register_video_create_tool(mcp: FastMCP) -> None:
         
         【一、 核心工作流与异步架构】
         1. 前置条件：必须提供有效的 project_id；若使用首尾帧或参考素材，该图片/素材必须已存在于该项目中。
-        2. 异步执行：本工具在后台异步执行生成任务，立即返回任务启动信息与唯一 job_id（此时 is_finished=False）。
+        2. 异步执行与全局单任务队列：本工具在后台异步执行生成任务。全服务（视频/图片/角色）共用单一浏览器，同一时刻仅允许一个任务处于生成中。若当前空闲则立即启动（status='started'）；若已有任务在生成中，将自动进入全局 FIFO 排队队列（status='queued'），前置任务完成后自动顺序执行。智能体【严禁】因看到 queued 而重复调用创建工具！可调用 `task_queue_status` 查看全局队列，或使用 `task_cancel(job_id)` 取消任务。
         3. 状态轮询：视频生成通常耗时 1~3 分钟（最大超时 5 分钟），智能体【必须】使用返回的 job_id 定期调用 `video_status` 工具轮询状态（建议每隔 5~10 秒轮询一次）。
         4. 结束判定：智能体必须根据 `video_status` 返回的 `is_finished` 字段判定任务是否结束：
-           - 若 `is_finished == False`：任务仍在生成中，智能体【严禁】停止轮询或向用户提前下结论，必须等待 5-10 秒后继续调用 `video_status` 查询。
+           - 若 `is_finished == False`：任务仍在排队中（queued）或生成中（generating），智能体【严禁】停止轮询或向用户提前下结论，必须等待 5-10 秒后继续调用 `video_status` 查询。
            - 若 `is_finished == True`：任务已彻底完成（或失败），智能体方可停止轮询，并向用户展示视频链接、本地下载文件路径或错误信息。
         
         【二、 两大生成模式与参数互斥规则】
         1. 首尾帧模式 (mode='frame')：
-           - 适用场景：指定起始图与结束图，让 AI 生成两张图之间的动作过渡/插值动画。
+           - 适用场景：指定起始图与结束图，让 AI 生成两张图之间的动作过渡/插值动画。Veo 系列模型与 Omni 均支持。
            - 必需参数：必须同时提供 start_frame 和 end_frame（项目内已有的图片资源名称）。
-           - 互斥限制：【严禁】传递 assets 参数（否则触发 ValidationError 报错）。
+           - 互斥与素材限制：【严禁】传递 assets 参数（否则触发 ValidationError 报错）。【重要】对于 Veo 模型，除了首帧和尾帧之外，不能再添加任何其它素材作为参考。
         2. 素材参考 / 纯文本模式 (mode='asset')：
-           - 纯文本生视频 (Text-to-Video)：mode='asset' 且 assets="" 留空，仅依靠 prompt 纯文本描述生成。
-           - 素材参考生视频 (Asset-to-Video)：mode='asset' 且 assets 提供逗号分隔的已有素材名称（作为主体或风格参考）。
+           - 纯文本生视频 (Text-to-Video)：mode='asset' 且 assets="" 留空，仅依靠 prompt 纯文本描述生成。Omni 和 Veo 模型均完美支持。
+           - 素材参考生视频 (Asset-to-Video)：mode='asset' 且 assets 提供逗号分隔的已有素材名称。
+             【极重要说明 - Veo 模型素材限制】：在素材模式下添加素材作为参考时，Veo 系列模型（Veo 3.1 - Lite / Fast / Quality）**不会引用该素材**！因此如果需要基于素材进行视频生成，智能体**必须且只能使用 Omni 1.1 Flash 模型**；若使用 Veo 模型，请保持 assets="" 留空进行纯文本生视频。
            - 互斥限制：【严禁】传递 start_frame 或 end_frame 参数（否则触发 ValidationError 报错）。
         
         【三、 支持的模型系列与参数差异】
         1. 'Omni 1.1 Flash'：
            - 独占特性：支持在设置面板中指定分辨率 resolution ('360p', '720p') 与视频时长 duration (例如 8 秒)。响应快，适合快速预览。
+           - 素材参考支持：支持在素材模式 (mode='asset') 下传入 assets 引用已有素材作为参考生成视频。
         2. 'Veo 3.1 - Lite', 'Veo 3.1 - Fast', 'Veo 3.1 - Quality'：
            - 独占特性：电影级运镜与光影质感。不支持设置 resolution 与 duration（传入将被自动忽略）。推荐追求高质量画面时使用。
+           - 【模型素材引用关键限制（调用智能体必读）】：
+             ① 除了在帧模式 (mode='frame') 下可以添加首帧 (start_frame) 和尾帧 (end_frame) 之外，Veo 模型不能再添加其它任何素材作为参考。
+             ② 在素材模式 (mode='asset') 下即使添加了素材作为参考，Veo 模型也【不会引用】该素材！若智能体需要根据素材/角色参考生成视频，请务必选用 'Omni 1.1 Flash' 模型；对 Veo 模型请使用纯文本描述或帧模式。
         
         【四、 画面外观与产物控制】
         - aspect_ratio：'16:9' (标准横屏) 或 '9:16' (移动端竖屏短视频)。
@@ -337,8 +344,10 @@ def register_video_create_tool(mcp: FastMCP) -> None:
           video_create(project_id="...", prompt="...", model_name="Omni 1.1 Flash", mode="asset", assets="", aspect_ratio="16:9", resolution="720p", duration=8, download="1080p")
         - 场景 2：首尾帧过渡视频 (Veo 3.1 Fast 帧动画)
           video_create(project_id="...", prompt="...", model_name="Veo 3.1 - Fast", mode="frame", start_frame="sunny_landscape", end_frame="snowy_landscape", aspect_ratio="16:9")
-        - 场景 3：参考已有素材生视频 (Veo 3.1 Quality 竖屏)
-          video_create(project_id="...", prompt="...", model_name="Veo 3.1 - Quality", mode="asset", assets="hero_portrait", aspect_ratio="9:16")
+        - 场景 3：参考已有素材生视频 (Omni 1.1 Flash 竖屏 - 注意：Veo 不支持引用素材，引用素材必须使用 Omni)
+          video_create(project_id="...", prompt="...", model_name="Omni 1.1 Flash", mode="asset", assets="hero_portrait", aspect_ratio="9:16")
+        - 场景 4：Veo 高画质纯文本生视频 (Veo 3.1 Quality 横屏电影感，assets 留空)
+          video_create(project_id="...", prompt="...", model_name="Veo 3.1 - Quality", mode="asset", assets="", aspect_ratio="16:9")
         """
         # 1. Parameter validation
         if download and download.strip().lower() not in ("270p", "720p", "1080p"):
@@ -387,6 +396,12 @@ def register_video_create_tool(mcp: FastMCP) -> None:
                     "next_action": "参数冲突，素材模式不支持首尾帧参数，智能体请指定 mode='frame' 或移除首尾帧参数后重试。"
                 }, ensure_ascii=False)
 
+        is_veo = "veo" in model_name.lower()
+        pending_msg = "视频创建任务已在后台启动，超时时间为 5 分钟 (300s)，正在准备参数并导航至项目..."
+        if not is_frame_mode and assets and assets.strip() and is_veo:
+            logger.warning(f"Veo 模型 ({model_name}) 在素材模式下不会引用参考素材 assets={assets!r}，该素材将不会对生成生效。")
+            pending_msg += "【注意：Veo 模型在素材模式下不会引用参考素材 assets，模型将按纯文生视频处理，如需素材参考请使用 Omni 模型】"
+
         job_id = str(uuid.uuid4())
         _video_jobs[job_id] = {
             "job_id": job_id,
@@ -396,7 +411,7 @@ def register_video_create_tool(mcp: FastMCP) -> None:
             "progress_percent": 0,
             "progress_text": "0%",
             "elapsed_seconds": 0,
-            "message": "视频创建任务已在后台启动，超时时间为 5 分钟 (300s)，正在准备参数并导航至项目...",
+            "message": pending_msg,
             "next_action": f"任务初始化中（尚未完成），请等待 5-10 秒后继续调用 video_status(job_id='{job_id}') 检查进度。",
             "details": {
                 "project_id": project_id,
@@ -644,32 +659,39 @@ def register_video_create_tool(mcp: FastMCP) -> None:
                     "next_action": "任务执行失败，智能体请停止轮询，可向用户汇报具体失败原因。"
                 }
 
-        thread = threading.Thread(target=task_worker, daemon=True)
-        thread.start()
-
-        return json.dumps({
-            "success": True,
-            "status": "started",
-            "is_finished": False,
-            "job_id": job_id,
-            "message": f"视频创建任务已在后台启动，超时时间为 5 分钟 (300s)。请调用 video_status(job_id='{job_id}') 轮询结果。",
-            "next_action": f"请等待 5-10 秒后调用 video_status(job_id='{job_id}') 查询进度，依据返回的 is_finished 字段判断是否完成。",
-            "params": {
-                "project_id": project_id,
-                "prompt": prompt,
-                "video_name": video_name,
-                "model_name": model_name,
-                "mode": mode,
-                "start_frame": start_frame,
-                "end_frame": end_frame,
-                "assets": assets,
-                "aspect_ratio": aspect_ratio,
-                "resolution": resolution,
-                "duration": duration,
-                "quantity": quantity,
-                "download": download,
-            }
-        }, ensure_ascii=False)
+        submit_res = task_manager.submit_task(
+            task_type="video",
+            job_id=job_id,
+            initial_state=_video_jobs[job_id],
+            worker_fn=task_worker,
+            project_id=project_id,
+            task_name=video_name or f"video_{job_id[:8]}"
+        )
+        submit_res["params"] = {
+            "project_id": project_id,
+            "prompt": prompt,
+            "video_name": video_name,
+            "model_name": model_name,
+            "mode": mode,
+            "start_frame": start_frame,
+            "end_frame": end_frame,
+            "assets": assets,
+            "aspect_ratio": aspect_ratio,
+            "resolution": resolution,
+            "duration": duration,
+            "quantity": quantity,
+            "download": download,
+        }
+        if submit_res.get("status") == "started":
+            started_msg = f"视频创建任务已在后台启动，超时时间为 5 分钟 (300s)。请调用 video_status(job_id='{job_id}') 轮询结果。"
+            if not is_frame_mode and assets and assets.strip() and is_veo:
+                started_msg += "【注意：Veo 模型在素材模式下不会引用参考素材 assets，模型将按纯文生视频处理，如需素材参考请使用 Omni 模型】"
+                submit_res["warning"] = "Veo 模型在素材模式下不会引用参考素材，传入的 assets 将不会被模型引用。"
+            submit_res.update({
+                "message": started_msg,
+                "next_action": f"请等待 5-10 秒后调用 video_status(job_id='{job_id}') 查询进度，依据返回的 is_finished 字段判断是否完成。"
+            })
+        return json.dumps(submit_res, ensure_ascii=False)
 
 
 def register_video_status_tool(mcp: FastMCP) -> None:
@@ -691,15 +713,5 @@ def register_video_status_tool(mcp: FastMCP) -> None:
            - 'error': 任务失败，详细原因见 error 字段（is_finished=True）。
         3. 建议行动：直接参考返回的 `next_action` 字段进行下一步操作（继续轮询等待或汇报结果）。
         """
-        if job_id not in _video_jobs:
-            return json.dumps({
-                "job_id": job_id,
-                "status": "error",
-                "is_finished": True,
-                "error": f"未找到任务 ID: {job_id}。任务可能不存在或服务已重启。",
-                "message": f"未找到任务 ID: {job_id}。任务可能不存在或服务已重启。",
-                "next_action": "未找到任务记录，智能体请停止轮询，请核对 job_id 或重新发起任务。"
-            }, ensure_ascii=False)
-
-        state = _video_jobs[job_id]
+        state = task_manager.get_task_status(job_id)
         return json.dumps(state, ensure_ascii=False)

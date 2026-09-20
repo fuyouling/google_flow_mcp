@@ -5,14 +5,36 @@ from google_flow_mcp.tools.image_create import _jobs, register_image_create_tool
 from google_flow_mcp.tools.video_create import _video_jobs, register_video_create_tool, register_video_status_tool
 
 
+from google_flow_mcp.tasks.manager import task_manager
+
+
+from unittest.mock import patch
+
+
 @pytest.fixture
 def mcp_server():
+    task_manager.reset()
     server = FastMCP("test_status_server")
     register_image_create_tool(server)
     register_image_status_tool(server)
     register_video_create_tool(server)
     register_video_status_tool(server)
-    return server
+    
+    orig_submit = task_manager.submit_task
+
+    def dummy_submit(task_type, job_id, initial_state, worker_fn, **kwargs):
+        return orig_submit(
+            task_type=task_type,
+            job_id=job_id,
+            initial_state=initial_state,
+            worker_fn=lambda: None,
+            **kwargs
+        )
+
+    with patch.object(task_manager, "submit_task", side_effect=dummy_submit):
+        yield server
+
+    task_manager.reset()
 
 
 def get_tool(server: FastMCP, tool_name: str):
@@ -239,3 +261,21 @@ def test_video_status_not_found(mcp_server):
     assert res["is_finished"] is True
     assert "未找到任务 ID" in res["error"]
     assert "停止轮询" in res["next_action"]
+
+
+def test_video_create_veo_asset_warning(mcp_server):
+    video_create_fn = get_tool(mcp_server, "video_create")
+    res_raw = video_create_fn(
+        project_id="proj_1",
+        prompt="A dog playing in the garden",
+        model_name="Veo 3.1 - Quality",
+        mode="asset",
+        assets="dog_character",
+    )
+    res = json.loads(res_raw)
+    assert res["success"] is True
+    assert res["status"] == "started"
+    assert "warning" in res
+    assert "不会引用参考素材" in res["warning"]
+    assert "Veo 模型在素材模式下不会引用参考素材" in res["message"]
+

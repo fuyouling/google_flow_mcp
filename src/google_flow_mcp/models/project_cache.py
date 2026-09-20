@@ -1,6 +1,6 @@
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Optional
 from loguru import logger
 
@@ -47,10 +47,69 @@ class ProjectCache:
     @classmethod
     def update_project(cls, project_id: str, name: str, url: str) -> None:
         data = cls.load()
-        data["projects"][project_id] = {
+        existing = data.get("projects", {}).get(project_id, {})
+        data.setdefault("projects", {})[project_id] = {
+            **existing,
             "id": project_id,
             "name": name,
             "url": url,
-            "last_accessed": datetime.utcnow().isoformat() + "Z"
+            "last_accessed": datetime.now(timezone.utc).isoformat()
         }
         cls.save(data)
+
+    @classmethod
+    def update_project_characters(cls, project_id: str, characters: list) -> None:
+        data = cls.load()
+        existing = data.get("projects", {}).get(project_id, {})
+        data.setdefault("projects", {})[project_id] = {
+            **existing,
+            "id": project_id,
+            "characters": characters,
+            "last_characters_updated": datetime.now(timezone.utc).isoformat()
+        }
+        cls.save(data)
+
+    @classmethod
+    def get_project_characters(cls, project_id: str) -> Optional[list]:
+        proj = cls.get_project_by_id(project_id)
+        if proj:
+            return proj.get("characters")
+        return None
+
+    @classmethod
+    def update_project_images(cls, project_id: str, images: list) -> None:
+        data = cls.load()
+        existing = data.get("projects", {}).get(project_id, {})
+        data.setdefault("projects", {})[project_id] = {
+            **existing,
+            "id": project_id,
+            "images": images,
+            "last_images_updated": datetime.now(timezone.utc).isoformat()
+        }
+        cls.save(data)
+
+    @classmethod
+    def get_project_images(cls, project_id: str) -> Optional[list]:
+        proj = cls.get_project_by_id(project_id)
+        if proj:
+            return proj.get("images")
+        return None
+
+    @classmethod
+    def update_project_videos(cls, project_id: str, videos: list) -> None:
+        data = cls.load()
+        existing = data.get("projects", {}).get(project_id, {})
+        data.setdefault("projects", {})[project_id] = {
+            **existing,
+            "id": project_id,
+            "videos": videos,
+            "last_videos_updated": datetime.now(timezone.utc).isoformat()
+        }
+        cls.save(data)
+
+    @classmethod
+    def get_project_videos(cls, project_id: str) -> Optional[list]:
+        proj = cls.get_project_by_id(project_id)
+        if proj:
+            return proj.get("videos")
+        return None

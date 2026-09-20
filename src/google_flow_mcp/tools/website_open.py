@@ -24,6 +24,15 @@ def register_website_open_tool(mcp: FastMCP) -> None:
         url = url or settings.google_flow_base_url
         logger.info(f"Executing website_open for URL: {url}")
 
+        from google_flow_mcp.tasks.manager import task_manager
+        is_busy, busy_task = task_manager.is_browser_busy()
+        if is_busy:
+            job_id = busy_task.get("job_id", "unknown") if busy_task else "unknown"
+            task_type = busy_task.get("task_type", "生成") if busy_task else "生成"
+            error_msg = f"当前有后台{task_type}任务正在执行中 (job_id='{job_id}') 占用浏览器，暂无法跳转网页。请等待生成完成或使用 task_cancel(job_id='{job_id}') 取消后再操作。"
+            logger.warning(f"website_open blocked: browser is busy with job {job_id}")
+            return ToolResponse(success=False, error=error_msg).to_json()
+
         try:
             browser = get_browser()
             logger.info(f"Navigating to {url}")

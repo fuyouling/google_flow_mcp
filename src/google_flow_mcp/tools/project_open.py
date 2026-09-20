@@ -16,7 +16,22 @@ def register_project_open_tool(mcp: FastMCP) -> None:
         from google_flow_mcp.models.project_cache import ProjectCache
         import json
         
+        from google_flow_mcp.tasks.manager import task_manager
+        
         logger.info(f"Executing project_open for UUID: {project_id}")
+
+        is_busy, busy_task = task_manager.is_browser_busy()
+        if is_busy:
+            job_id = busy_task.get("job_id", "unknown") if busy_task else "unknown"
+            task_type = busy_task.get("task_type", "生成") if busy_task else "生成"
+            error_msg = f"当前有后台{task_type}任务正在执行中 (job_id='{job_id}') 占用浏览器，暂无法跳转项目。请等待生成完成或使用 task_cancel(job_id='{job_id}') 取消后再操作。"
+            logger.warning(f"project_open blocked: browser is busy with job {job_id}")
+            return json.dumps({
+                "success": False,
+                "error": error_msg,
+                "busy_job_id": job_id,
+                "message": error_msg
+            }, ensure_ascii=False)
         
         proj = ProjectCache.get_project_by_id(project_id)
         if not proj:

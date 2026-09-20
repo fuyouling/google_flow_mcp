@@ -25,6 +25,21 @@ def register_project_list_tool(mcp: FastMCP) -> None:
                 return json.dumps(cache_data["projects"], ensure_ascii=False, indent=2)
                 
         # Force refresh
+        from google_flow_mcp.tasks.manager import task_manager
+        is_busy, busy_task = task_manager.is_browser_busy()
+        if is_busy:
+            job_id = busy_task.get("job_id", "unknown") if busy_task else "unknown"
+            task_type = busy_task.get("task_type", "生成") if busy_task else "生成"
+            error_msg = f"当前有后台{task_type}任务正在执行中 (job_id='{job_id}') 占用浏览器，暂无法强制刷新抓取网页。请等待生成完成，或使用 force_refresh=False 读取本地缓存。"
+            logger.warning(f"project_list(force_refresh=True) blocked: browser is busy with job {job_id}")
+            cache_data = ProjectCache.load()
+            if cache_data and cache_data.get("projects"):
+                return json.dumps({
+                    "warning": error_msg,
+                    "projects": cache_data["projects"]
+                }, ensure_ascii=False, indent=2)
+            return json.dumps({"error": error_msg, "busy_job_id": job_id}, ensure_ascii=False)
+
         try:
             browser = get_browser()
             page = FlowHomePage(browser.latest_tab)
