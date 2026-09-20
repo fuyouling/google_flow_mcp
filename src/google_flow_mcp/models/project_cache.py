@@ -113,3 +113,24 @@ class ProjectCache:
         if proj:
             return proj.get("videos")
         return None
+
+    @classmethod
+    def set_worker_project_id(cls, worker_id: str, project_alias: str, local_uuid: str) -> None:
+        """Record local project UUID for a specific worker and logical project alias."""
+        data = cls.load()
+        cluster_mappings = data.setdefault("cluster_projects", {})
+        proj_map = cluster_mappings.setdefault(project_alias, {})
+        proj_map[worker_id] = local_uuid
+        cls.save(data)
+
+    @classmethod
+    def get_worker_project_id(cls, worker_id: str, project_alias: str) -> Optional[str]:
+        """Get local project UUID for a worker, falling back to direct ID match."""
+        data = cls.load()
+        mapped = data.get("cluster_projects", {}).get(project_alias, {}).get(worker_id)
+        if mapped:
+            return mapped
+        # Fallback: if project_alias is already a known project ID
+        if project_alias in data.get("projects", {}):
+            return project_alias
+        return None

@@ -31,9 +31,20 @@ class TaskManager:
         # 历史记录 (LRU 淘汰)
         self._history_jobs: OrderedDict[str, dict] = OrderedDict()
 
+        # 集群调度器桥接（当启用多机模式时非空）
+        self._cluster_scheduler = None
+
         # 后台消费线程
         self._worker_thread = threading.Thread(target=self._worker_loop, daemon=True, name="TaskManagerWorker")
         self._worker_thread.start()
+
+    def set_cluster_scheduler(self, scheduler) -> None:
+        """附加 ClusterScheduler 实例用于多节点集群分布式调度"""
+        with self._lock:
+            self._cluster_scheduler = scheduler
+            # 共享全局 jobs 字典引用
+            if scheduler and hasattr(scheduler, "jobs"):
+                self._all_jobs = scheduler.jobs
 
     @property
     def jobs(self) -> dict[str, dict]:
@@ -80,13 +91,57 @@ class TaskManager:
         initial_state: dict,
         worker_fn: Callable[[], Any],
         project_id: str = "",
-        task_name: str = ""
+        task_name: str = "",
+        params: dict | None = None,
+        required_assets: list[str] | None = None,
     ) -> dict:
         """
         提交生成任务至全局队列。
-        如果当前空闲，将立即被 worker 取出执行；若已有任务生成中，则进入排队。
+        如果处于集群模式，任务将委托给 ClusterScheduler 进行跨机调度。
+        如果处于单机模式，任务将排入单机 FIFO 队列顺序执行。
         """
         with self._lock:
+            # ── 集群模式路由 ────────────────────────────────────
+            if self._cluster_scheduler is not None:
+                from google_flow_mcp.cluster.models import TaskType
+                tt_map = {
+                    "video": TaskType.VIDEO_CREATE,
+                    "video_create": TaskType.VIDEO_CREATE,
+                    "video_upload": TaskType.VIDEO_CREATE_BY_UPLOAD,
+                    "video_create_by_upload": TaskType.VIDEO_CREATE_BY_UPLOAD,
+                    "image": TaskType.IMAGE_CREATE,
+                    "image_create": TaskType.IMAGE_CREATE,
+                    "image_upload": TaskType.IMAGE_CREATE_BY_UPLOAD,
+                    "image_create_by_upload": TaskType.IMAGE_CREATE_BY_UPLOAD,
+                    "character": TaskType.CHARACTER_CREATE,
+                    "character_create": TaskType.CHARACTER_CREATE,
+                    "character_upload": TaskType.CHARACTER_CREATE_BY_UPLOAD,
+                    "character_create_by_upload": TaskType.CHARACTER_CREATE_BY_UPLOAD,
+                }
+                tt = tt_map.get(task_type.lower(), TaskType.VIDEO_CREATE)
+                self._cluster_scheduler.submit_task(
+                    task_type=tt,
+                    project_alias=project_id,
+                    params=params or {},
+                    required_assets=required_assets or [],
+                    job_id=job_id,
+                )
+                if job_id in self._cluster_scheduler.jobs:
+                    self._cluster_scheduler.jobs[job_id].update(initial_state)
+                self._all_jobs[job_id] = self._cluster_scheduler.jobs[job_id]
+                q_pos = len(self._cluster_scheduler.pending_tasks)
+                logger.info(f"Task {job_id} routed to ClusterScheduler (pending: {q_pos})")
+                return {
+                    "success": True,
+                    "status": "started" if q_pos == 0 else "queued",
+                    "is_finished": False,
+                    "job_id": job_id,
+                    "queue_position": q_pos,
+                    "message": f"任务已提交至集群调度器（队列位次: {q_pos}）。",
+                    "next_action": f"请等待 5 秒后调用对应的 status(job_id='{job_id}') 查询进度。"
+                }
+
+            # ── 单机模式执行 ────────────────────────────────────
             # 清理已终态的 _current_task
             if self._current_task is not None:
                 c_id = self._current_task["job_id"]
@@ -224,11 +279,19 @@ class TaskManager:
     def cancel_task(self, job_id: str) -> dict:
         """
         取消任务：
-        - 若在队列中排队：直接从队列中移除并标记为 cancelled。
-        - 若正在执行中：触发取消标记并安全重置浏览器。
-        - 若已结束：返回无法取消提示。
+        - 集群模式：委托给 ClusterScheduler 取消。
+        - 单机模式：若在队列中排队则移除，若正在执行中则触发取消标记。
         """
         with self._lock:
+            if self._cluster_scheduler is not None:
+                success = self._cluster_scheduler.cancel_task(job_id)
+                return {
+                    "success": success,
+                    "job_id": job_id,
+                    "status": "cancelled" if success else "not_found",
+                    "message": "任务已从集群队列中成功取消。" if success else f"未找到任务 ID: {job_id}。"
+                }
+
             # 1. 检查是否在排队中（未开始执行）
             is_active_current = (self._current_task is not None and self._current_task["job_id"] == job_id)
             for idx, task in enumerate(self._queue):
@@ -305,6 +368,32 @@ class TaskManager:
         获取全局任务队列汇总状态（当前执行 + 排队列表）。
         """
         with self._lock:
+            if self._cluster_scheduler is not None:
+                workers = self._cluster_scheduler.get_workers()
+                idle_count = len([w for w in workers if w.state.value == "idle"])
+                pending_count = len(self._cluster_scheduler.pending_tasks)
+                active_count = len(self._cluster_scheduler.active_tasks)
+                return {
+                    "is_busy": (idle_count == 0 and len(workers) > 0) or pending_count > 0,
+                    "cluster_mode": True,
+                    "worker_count": len(workers),
+                    "idle_workers": idle_count,
+                    "active_tasks": active_count,
+                    "queue_length": pending_count,
+                    "history_count": len(self._history_jobs),
+                    "workers": [
+                        {
+                            "worker_id": w.worker_id,
+                            "ip": w.ip,
+                            "state": w.state.value,
+                            "account": w.account,
+                            "current_job_id": w.current_job_id,
+                            "cached_asset_count": len(w.cached_assets),
+                        }
+                        for w in workers
+                    ],
+                }
+
             current_info = None
             if self._current_task is not None:
                 c_id = self._current_task["job_id"]

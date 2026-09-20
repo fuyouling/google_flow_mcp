@@ -659,15 +659,7 @@ def register_video_create_tool(mcp: FastMCP) -> None:
                     "next_action": "任务执行失败，智能体请停止轮询，可向用户汇报具体失败原因。"
                 }
 
-        submit_res = task_manager.submit_task(
-            task_type="video",
-            job_id=job_id,
-            initial_state=_video_jobs[job_id],
-            worker_fn=task_worker,
-            project_id=project_id,
-            task_name=video_name or f"video_{job_id[:8]}"
-        )
-        submit_res["params"] = {
+        task_params = {
             "project_id": project_id,
             "prompt": prompt,
             "video_name": video_name,
@@ -682,6 +674,26 @@ def register_video_create_tool(mcp: FastMCP) -> None:
             "quantity": quantity,
             "download": download,
         }
+        required_assets = []
+        if is_frame_mode:
+            if start_frame:
+                required_assets.append(start_frame.strip())
+            if end_frame:
+                required_assets.append(end_frame.strip())
+        elif assets:
+            required_assets = [a.strip() for a in assets.split(",") if a.strip()]
+
+        submit_res = task_manager.submit_task(
+            task_type="video",
+            job_id=job_id,
+            initial_state=_video_jobs[job_id],
+            worker_fn=task_worker,
+            project_id=project_id,
+            task_name=video_name or f"video_{job_id[:8]}",
+            params=task_params,
+            required_assets=required_assets,
+        )
+        submit_res["params"] = task_params
         if submit_res.get("status") == "started":
             started_msg = f"视频创建任务已在后台启动，超时时间为 5 分钟 (300s)。请调用 video_status(job_id='{job_id}') 轮询结果。"
             if not is_frame_mode and assets and assets.strip() and is_veo:

@@ -79,7 +79,57 @@ atexit.register(task_manager.stop)
 
 
 def main() -> None:
-    """Run the MCP server in stdio transport mode."""
+    """Run the MCP server in stdio transport mode with cluster support."""
+    from pathlib import Path
+    import threading
+    from google_flow_mcp.config import get_settings
+
+    settings = get_settings()
+
+    if settings.is_cluster_enabled:
+        from google_flow_mcp.cluster.asset_hub import AssetHub
+        from google_flow_mcp.cluster.scheduler import ClusterScheduler
+        from google_flow_mcp.cluster.master_server import MasterServer
+        from google_flow_mcp.cluster.worker_client import WorkerClient
+        from google_flow_mcp.cluster.launcher import get_lan_ips
+
+        lan_ips = get_lan_ips()
+        primary_ip = lan_ips[0] if lan_ips else "127.0.0.1"
+
+        logger.info(
+            f"Initializing Cluster Master on {settings.cluster_master_host}:{settings.cluster_master_port}..."
+        )
+        logger.info(
+            f"Cluster Master active on 0.0.0.0:{settings.cluster_master_port} (LAN IP: {primary_ip})"
+        )
+        logger.info(f"Workers can connect to: http://{primary_ip}:{settings.cluster_master_port}")
+
+        asset_hub = AssetHub(Path(settings.cluster_asset_dir))
+        cluster_scheduler = ClusterScheduler()
+        master_server = MasterServer(
+            scheduler=cluster_scheduler,
+            asset_hub=asset_hub,
+            host=settings.cluster_master_host,
+            port=settings.cluster_master_port,
+        )
+        master_server.start()
+
+        # Connect task_manager to cluster_scheduler
+        task_manager.set_cluster_scheduler(cluster_scheduler)
+
+        # Start Local Worker 0
+        local_worker = WorkerClient(
+            master_url=f"http://127.0.0.1:{settings.cluster_master_port}",
+            worker_id=settings.worker_id,
+            account=settings.worker_account,
+        )
+        threading.Thread(
+            target=local_worker.run_forever, daemon=True, name="MasterLocalWorker"
+        ).start()
+
+        atexit.register(master_server.stop)
+        atexit.register(local_worker.stop)
+
     logger.info("Starting google-flow-mcp server (stdio mode)...")
     mcp.run(transport="stdio")
 

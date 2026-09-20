@@ -29,6 +29,15 @@ class Settings(BaseSettings):
     google_flow_base_url: str = "https://flow.google.com"
     log_level: str = "INFO"
 
+    # Cluster settings
+    cluster_master_host: str = "0.0.0.0"
+    cluster_master_port: int = 8765
+    cluster_master_url: str = "http://127.0.0.1:8765"
+    cluster_asset_dir: str = str(PROJECT_ROOT / "data" / "assets")
+    worker_id: str = "master_local_worker"
+    worker_account: str = ""
+    is_cluster_enabled: bool = True
+
     @field_validator("chrome_user_data_dir", mode="before")
     @classmethod
     def normalize_path(cls, v: str) -> str:
