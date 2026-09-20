@@ -40,7 +40,7 @@ param(
 Set-Location -Path $PSScriptRoot
 
 if (Test-Path ".venv\Scripts\python.exe") {
-    & .venv\Scripts\python.exe src\utils\start_browser.py @ScriptArgs
+    & .venv\Scripts\python.exe -m google_flow_mcp.browser.start_browser @ScriptArgs
 } else {
-    python src\utils\start_browser.py @ScriptArgs
+    python -m google_flow_mcp.browser.start_browser @ScriptArgs
 }

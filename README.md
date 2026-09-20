@@ -18,6 +18,8 @@
 ```
 google_flow_mcp/
 ├── docs/                     # 设计与接口参考文档
+│   ├── tools_reference.md    # 完整 MCP 工具说明与接入参考文档 (19 个核心工具详解)
+│   └── architecture.md       # 系统架构设计
 ├── src/google_flow_mcp/
 │   ├── browser/              # 浏览器会话与参数构建
 │   ├── models/               # 数据模型与 ToolResponse

@@ -5,12 +5,12 @@
 避免反复拉起或关闭浏览器窗口。
 
 使用方式:
-    python src/utils/start_browser.py              # 启动并常驻前台（推荐：显示状态，按 q 退出，按 r 刷新）
-    python src/utils/start_browser.py --detach     # 启动/接管后直接退出终端交互（后台模式）
-    python src/utils/start_browser.py --status     # 查看当前 9222 端口浏览器的运行状态
-    python src/utils/start_browser.py --stop       # 关闭运行在 9222 端口的浏览器
-    python src/utils/start_browser.py --force      # 强制重启（先杀死占用 9222 端口的残留进程）
-    python src/utils/start_browser.py --url <URL>  # 启动后打开指定的 URL
+    python -m google_flow_mcp.browser.start_browser              # 启动并常驻前台（推荐：显示状态，按 q 退出，按 r 刷新）
+    python -m google_flow_mcp.browser.start_browser --detach     # 启动/接管后直接退出终端交互（后台模式）
+    python -m google_flow_mcp.browser.start_browser --status     # 查看当前 9222 端口浏览器的运行状态
+    python -m google_flow_mcp.browser.start_browser --stop       # 关闭运行在 9222 端口的浏览器
+    python -m google_flow_mcp.browser.start_browser --force      # 强制重启（先杀死占用 9222 端口的残留进程）
+    python -m google_flow_mcp.browser.start_browser --url <URL>  # 启动后打开指定的 URL
 """
 
 import argparse
@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 # 确保项目根目录与 src 目录在 sys.path 中
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 SRC_DIR = PROJECT_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
@@ -126,7 +126,7 @@ def check_status(port: int = 9222) -> None:
 
     if not in_use:
         print(f"状态: [未运行] 端口 {port} 未被监听。")
-        print("提示: 可执行 `python src/utils/start_browser.py` 启动常驻浏览器。")
+        print("提示: 可执行 `start_browser.bat` 或 `.\\start_browser.ps1` 启动常驻浏览器。")
         print("=" * 64)
         return
 
@@ -151,7 +151,7 @@ def check_status(port: int = 9222) -> None:
         print("\n结论: ✅ 浏览器正在运行且 CDP 响应正常，智能体可直接连接。")
     else:
         print(f"CDP 协议: [异常] 端口 {port} 已被占用，但未能响应 CDP 调试协议。")
-        print("提示: 该端口可能被其他应用占用，可运行 `python src/utils/start_browser.py --force` 重启。")
+        print("提示: 该端口可能被其他应用占用，可运行 `.\\start_browser.ps1 -Force` 重启。")
 
     print("=" * 64)
 

@@ -39,4 +39,4 @@ else
     exit 1
 fi
 
-exec "$PYTHON_EXEC" src/utils/start_browser.py "$@"
+exec "$PYTHON_EXEC" -m google_flow_mcp.browser.start_browser "$@"

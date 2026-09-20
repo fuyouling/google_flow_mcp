@@ -320,7 +320,7 @@ def main():
 
     if args.auto_browser:
         try:
-            from utils.start_browser import is_port_in_use, launch_browser
+            from google_flow_mcp.browser.start_browser import is_port_in_use, launch_browser
             if not is_port_in_use(9222):
                 logger.info("Auto-launching Chromium browser on port 9222...")
                 launch_browser(detach=True, port=9222)

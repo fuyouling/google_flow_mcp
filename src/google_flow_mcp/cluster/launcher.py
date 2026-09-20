@@ -62,7 +62,7 @@ def normalize_master_url(raw_url: str, default_port: int = 8765) -> str:
 
 def ensure_browser_running(port: int = 9222, force: bool = False) -> bool:
     """检查并在需要时后台启动 Chrome 浏览器。"""
-    from utils.start_browser import get_cdp_version, is_port_in_use, launch_browser
+    from google_flow_mcp.browser.start_browser import get_cdp_version, is_port_in_use, launch_browser
 
     if not force and is_port_in_use(port):
         cdp = get_cdp_version(port)

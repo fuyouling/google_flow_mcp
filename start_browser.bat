@@ -28,9 +28,9 @@ title Google Flow MCP Browser Service (CDP: 9222)
 cd /d "%~dp0"
 
 if exist ".venv\Scripts\python.exe" (
-    .venv\Scripts\python.exe src\utils\start_browser.py %*
+    .venv\Scripts\python.exe -m google_flow_mcp.browser.start_browser %*
 ) else (
-    python src\utils\start_browser.py %*
+    python -m google_flow_mcp.browser.start_browser %*
 )
 
 pause
