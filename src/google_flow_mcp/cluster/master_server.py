@@ -297,6 +297,28 @@ class MasterServer:
                 "workers": workers,
             })
 
+        @app.post("/api/account/update")
+        async def account_update(
+            email: str = Form(...),
+            credits: int = Form(None),
+            worker_id: str = Form(""),
+        ):
+            from google_flow_mcp.models.account_cache import AccountCache
+            try:
+                if email:
+                    AccountCache.update(email=email, credits=credits, worker_id=worker_id)
+                    if worker_id and worker_id in self.scheduler.workers:
+                        w = self.scheduler.workers[worker_id]
+                        w.account = email
+                        acc_info = AccountCache.get_account_credits(email)
+                        w.credits = acc_info.get("credits")
+                        w.daily_free_remaining = acc_info.get("daily_free_remaining", 50)
+                    logger.info(f"Master API: account updated (email={email}, credits={credits}, worker={worker_id})")
+                return JSONResponse({"success": True})
+            except Exception as e:
+                logger.error(f"Account update API failed: {e}")
+                return JSONResponse({"error": str(e)}, status_code=500)
+
         return app
 
     # ── Server Lifecycle ─────────────────────────────────────

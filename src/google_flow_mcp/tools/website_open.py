@@ -67,69 +67,59 @@ def _fetch_and_cache_credits(
             worker = get_worker_client()
             if worker is not None:
                 worker.report_account_info(email=save_email, credits=fresh_credits)
-            else:
-                _report_credits_via_grpc_temp(email=save_email, credits=fresh_credits)
         except Exception as e:
             logger.debug(f"website_open: WorkerClient 上报跳过或异常: {e}")
+
+        # 尝试通过临时 HTTP 请求上报（非阻塞/弱依赖）
+        try:
+            _report_credits_via_http_temp(email=save_email, credits=fresh_credits)
+        except Exception as e:
+            logger.debug(f"website_open: 临时 HTTP 上报失败: {e}")
 
     return credits
 
 
-def _report_credits_via_grpc_temp(email: str, credits: int) -> None:
+def _report_credits_via_http_temp(email: str, credits: int) -> None:
     """
     如果在非 WorkerClient 进程（如独立的 start_browser 脚本）中抓到了积分，
-    尝试建立一个临时的 gRPC Stream 通知 Master。
+    尝试通过 HTTP POST 通知 Master，以便 Master 更新大盘。
     """
     try:
         from google_flow_mcp.config import get_settings
+        import socket
+        import requests
+        from loguru import logger
+        
         settings = get_settings()
         if not settings.is_cluster_enabled or not settings.cluster_master_url:
             return
 
-        import asyncio
-        from grpc import aio as grpc_aio
-        from google_flow_mcp.cluster.proto import cluster_pb2, cluster_pb2_grpc
+        master_url = settings.cluster_master_url.rstrip("/")
+        api_url = f"{master_url}/api/account/update"
         
-        master_host = "127.0.0.1"
-        try:
-            from urllib.parse import urlparse
-            parsed = urlparse(settings.cluster_master_url)
-            if parsed.hostname:
-                master_host = parsed.hostname
-        except Exception:
-            pass
+        worker_id = (
+            settings.worker_id
+            if settings.worker_id and settings.worker_id != "master_local_worker"
+            else f"worker_{socket.gethostname()}"
+        )
         
-        grpc_target = f"{master_host}:{settings.cluster_grpc_port}"
-        worker_id = settings.worker_account or "standalone"
+        logger.info(f"[_report_credits_via_http_temp] Reporting credits to {api_url} as {worker_id}...")
         
-        async def _send():
-            try:
-                async with grpc_aio.insecure_channel(grpc_target) as channel:
-                    stub = cluster_pb2_grpc.ClusterServiceStub(channel)
-                    
-                    async def request_generator():
-                        yield cluster_pb2.WorkerMessage(
-                            account_info=cluster_pb2.AccountInfoUpdate(
-                                worker_id=worker_id,
-                                email=email,
-                                credits=credits
-                            )
-                        )
-                    
-                    # 开始调用，只发送一个元素即可
-                    async for _ in stub.StreamTasks(request_generator()):
-                        break
-            except Exception as e:
-                logger.debug(f"Temporary gRPC report failed: {e}")
-                
-        # 兼容当前是否有运行中的事件循环
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(_send())
-        except RuntimeError:
-            asyncio.run(_send())
+        data = {
+            "email": email,
+            "credits": credits,
+            "worker_id": worker_id
+        }
+        
+        response = requests.post(api_url, data=data, timeout=3.0)
+        if response.status_code == 200:
+            logger.info("[_report_credits_via_http_temp] Successfully reported credits to Master.")
+        else:
+            logger.warning(f"[_report_credits_via_http_temp] Failed to report. Status: {response.status_code}, Body: {response.text}")
+            
     except Exception as e:
-        logger.debug(f"Failed to initiate temp gRPC report: {e}")
+        from loguru import logger
+        logger.error(f"[_report_credits_via_http_temp] Exception while reporting credits via HTTP: {e}")
 
 
 
