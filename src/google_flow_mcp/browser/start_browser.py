@@ -158,6 +158,10 @@ def launch_browser(
     if force:
         print(f"[*] 执行强制重启: 清理端口 {port} 现有进程...")
         stop_browser(port)
+        if settings.chrome_user_data_dir:
+            from google_flow_mcp.browser.utils import kill_chrome_by_user_dir
+            if kill_chrome_by_user_dir(settings.chrome_user_data_dir):
+                print("[*] 已清理占用该数据目录的浏览器进程。")
         time.sleep(1)
 
     # 2. 检查当前是否已有可用的 CDP 实例
@@ -171,6 +175,11 @@ def launch_browser(
         sys.exit(1)
     else:
         print(f"[*] 端口 {port} 空闲，正在根据项目配置启动全新的 Chromium 实例...")
+        if not force and settings.chrome_user_data_dir:
+            from google_flow_mcp.browser.utils import kill_chrome_by_user_dir
+            if kill_chrome_by_user_dir(settings.chrome_user_data_dir):
+                print("[*] 发现占用该数据目录的残留进程，已自动清理。")
+                time.sleep(1)
 
     # 3. 构建配置并启动 / 接管浏览器
     options = _build_options(settings)

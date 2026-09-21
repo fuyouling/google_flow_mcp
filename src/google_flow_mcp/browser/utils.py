@@ -58,3 +58,31 @@ def stop_browser(port: int = 9222) -> bool:
     except Exception as e:
         logger.warning(f"停止进程失败: {e}")
         return False
+
+
+def kill_chrome_by_user_dir(user_data_dir: str) -> bool:
+    """关闭使用了指定 user_data_dir 的所有 chrome 进程。"""
+    import os
+    try:
+        norm_dir = os.path.normcase(os.path.abspath(user_data_dir))
+        killed_any = False
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            name = proc.info.get('name', '')
+            if name and 'chrome' in name.lower():
+                cmdline = proc.info.get('cmdline') or []
+                for arg in cmdline:
+                    if '--user-data-dir=' in arg:
+                        arg_dir = arg.split('=', 1)[1].strip('"\'')
+                        arg_norm_dir = os.path.normcase(os.path.abspath(arg_dir))
+                        if arg_norm_dir == norm_dir:
+                            logger.info(f"发现占用目标数据目录的 chrome 进程 (PID={proc.info['pid']})，准备强制结束")
+                            try:
+                                proc.kill()
+                                killed_any = True
+                            except psutil.NoSuchProcess:
+                                pass
+                            break
+        return killed_any
+    except Exception as e:
+        logger.warning(f"清理占用 user_data_dir 的进程时发生错误: {e}")
+        return False
