@@ -107,9 +107,10 @@ def get_browser() -> Chromium:
                 if attempt == 0 and is_connect_error:
                     logger.warning("BrowserConnectError detected. Attempting to clean up zombie processes and locks on port 9222 before retry...")
                     try:
-                        subprocess.run(["fuser", "-k", "9222/tcp"], capture_output=True)
-                    except Exception:
-                        pass
+                        from google_flow_mcp.browser.utils import stop_browser
+                        stop_browser(9222)
+                    except Exception as e_clean:
+                        logger.warning(f"Failed to clean port 9222: {e_clean}")
                         
                     if settings.chrome_user_data_dir:
                         lock_file = os.path.join(settings.chrome_user_data_dir, "SingletonLock")

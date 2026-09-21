@@ -127,7 +127,8 @@ def cmd_master(args: argparse.Namespace) -> None:
             scheduler=cluster_scheduler,
             asset_hub=asset_hub,
             host=settings.cluster_master_host,
-            port=settings.cluster_master_port,
+            http_port=settings.cluster_master_port,
+            grpc_port=settings.cluster_grpc_port,
         )
         master_server.start()
 
@@ -182,6 +183,17 @@ def cmd_worker(args: argparse.Namespace) -> None:
 
     master_url = normalize_master_url(master_url, settings.cluster_master_port)
 
+    # Derive grpc_target from master_url if not explicitly provided
+    grpc_target = args.grpc_target
+    if not grpc_target:
+        from urllib.parse import urlparse
+        try:
+            parsed = urlparse(master_url)
+            host = parsed.hostname or "127.0.0.1"
+            grpc_target = f"{host}:{settings.cluster_grpc_port}"
+        except Exception:
+            grpc_target = settings.cluster_grpc_target
+
     # 确定 Worker ID
     worker_id = args.id
     if not worker_id:
@@ -197,7 +209,8 @@ def cmd_worker(args: argparse.Namespace) -> None:
     print("=" * 76)
     print("           Google Flow MCP 集群从机节点 (Worker Node)")
     print("=" * 76)
-    print(f" [✔] 目标 Master 地址 : {master_url}")
+    print(f" [✔] 目标 Master HTTP(资产): {master_url}")
+    print(f" [✔] 目标 Master gRPC(调度): {grpc_target}")
     print(f" [✔] 从机节点 ID     : {worker_id}")
     print(f" [✔] 登录 Google 账号 : {account or '(未指定/自动使用本地浏览器会话)'}")
     print("=" * 76)
@@ -208,9 +221,10 @@ def cmd_worker(args: argparse.Namespace) -> None:
 
     from google_flow_mcp.cluster.worker_client import WorkerClient
 
-    print(f"\n[*] 正在连接 Master 节点 ({master_url})...")
+    print(f"\n[*] 正在连接 Master 节点...")
     client = WorkerClient(
         master_url=master_url,
+        grpc_target=grpc_target,
         worker_id=worker_id,
         account=account,
     )
@@ -256,6 +270,7 @@ def cmd_menu() -> None:
         # 伪造 worker 参数
         worker_parser = argparse.ArgumentParser()
         worker_parser.add_argument("--master", default=None)
+        worker_parser.add_argument("--grpc-target", default=None)
         worker_parser.add_argument("--id", default=None)
         worker_parser.add_argument("--account", default=None)
         worker_parser.add_argument("--no-browser", action="store_true")
@@ -321,6 +336,7 @@ def main() -> None:
     # worker
     p_worker = subparsers.add_parser("worker", help="启动 Worker 集群从机节点")
     p_worker.add_argument("--master", "-m", default=None, help="Master 节点地址 (例如 http://192.168.1.100:8765 或 192.168.1.100)")
+    p_worker.add_argument("--grpc-target", default=None, help="Master gRPC 目标地址 (默认根据 master 自动推导)")
     p_worker.add_argument("--id", default=None, help="从机节点唯一标识 (默认 worker_<主机名>)")
     p_worker.add_argument("--account", "-a", default=None, help="该从机登录的 Google Flow 账号标识")
     p_worker.add_argument("--no-browser", action="store_true", help="不自动检测或启动本机 Chrome")

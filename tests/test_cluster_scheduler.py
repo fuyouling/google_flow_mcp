@@ -10,6 +10,12 @@ from google_flow_mcp.cluster.models import (
 )
 
 
+@pytest.fixture(autouse=True)
+def mock_account_cache(tmp_path, monkeypatch):
+    test_file = str(tmp_path / "test_account_cache.json")
+    monkeypatch.setattr("google_flow_mcp.models.account_cache.ACCOUNT_CACHE_FILE", test_file)
+
+
 def test_scheduler_worker_registration_and_heartbeat():
     scheduler = ClusterScheduler(heartbeat_timeout=1.0)
     try:

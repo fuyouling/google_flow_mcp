@@ -1,9 +1,9 @@
-"""
+r"""
 通过 MCP Python 客户端测试 video_create 工具
-用途：验证视频生成流程（Omni/Veo 模型、首尾帧/素材模式、7分钟超时控制及视频下载连接提取）
+用途：验证视频生成流程（Omni/Veo 模型、首尾帧/素材模式、状态轮询、清晰度本地下载重命名保存流程）
 
 运行方式:
-    cd /home/ubuntu/google_flow_mcp
+    cd C:\dev\ai\mcp\google_flow_mcp
     uv run python tests/test_mcp_video_create.py
 """
 
@@ -22,19 +22,19 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() in ("gbk", "gb2312", "cp9
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 # ── 测试参数 ─────────────────────────────────────────────
-PROJECT_ID   = "41ffbc19-48f6-44c0-8b2a-4745e26ddc74"  # qqqq
+PROJECT_ID   = "41ffbc19-48f6-44c0-8b2a-4745e26ddc74"  # 目标项目 ID (留空 "" 则自动选用最近访问的项目)
 PROMPT       = "Mary Lennox 和 Officer Barney 正在吃饭"
 VIDEO_NAME   = "SE_03_VIDEO"
-# MODEL_NAME   = "Omni 1.1 Flash"  # 可选: "Omni 1.1 Flash", "Veo 3.1 - Lite" 等
-MODEL_NAME   = "Veo 3.1 - Lite"  # 可选: "Omni 1.1 Flash", "Veo 3.1 - Lite" 等
-MODE         = "frame"           # 可选: "frame" (帧模式), "asset" (素材模式)
-START_FRAME  = "SE_01"           # 默认已存在项目内的首帧图片
-END_FRAME    = "SE_02"           # 默认已存在项目内的尾帧图片
-ASSETS       = ""                # 帧模式下为空；素材模式下填素材名逗号分隔
-ASPECT_RATIO = "9:16"
-RESOLUTION   = "720p"            # 仅 Omni 模型生效
-DURATION     = 8                 # 仅 Omni 模型生效
+MODEL_NAME   = "Veo 3.1 - Lite"  # 可选: "Omni 1.1 Flash", "Veo 3.1 - Lite", "Veo 3.1 - Fast", "Veo 3.1 - Quality"
+MODE         = "frame"           # 生成模式: "frame" (首尾帧模式，需提供 start_frame 和 end_frame) 或 "asset" (纯文本/素材参考模式，默认)
+START_FRAME  = "SE_01"           # [仅帧模式] 首帧图片名称 (项目内已有)
+END_FRAME    = "SE_02"           # [仅帧模式] 尾帧图片名称 (项目内已有)
+ASSETS       = ""                # [仅素材模式] 逗号分隔的参考素材名称列表 (帧模式必须为空)
+ASPECT_RATIO = "9:16"            # 可选: "16:9", "9:16"
+RESOLUTION   = "720p"            # 仅 Omni 模型生效: "360p", "720p"
+DURATION     = 8                 # 仅 Omni 模型生效: 5 或 8
 QUANTITY     = 1
+DOWNLOAD     = "720p"            # 可选: "270p", "720p", "1080p"，留空 "" 则不自动下载
 MAX_WAIT     = 420               # 7 分钟超时 (420s)
 # ─────────────────────────────────────────────────────────
 
@@ -55,22 +55,21 @@ async def poll_status(session: ClientSession, job_id: str, max_wait: int = MAX_W
         raw = result.content[0].text
         state = json.loads(raw)
         status = state.get("status", "unknown")
-        progress = state.get("progress", "")
+        progress = state.get("progress", state.get("progress_percent", ""))
         prog_str = f"({progress}%)" if progress else ""
         print(f"  [{elapsed+5:3d}s] status={status} {prog_str}  msg={state.get('message', state.get('error', ''))}", flush=True)
 
-        if status in ("completed", "completed_with_rename_warning", "error"):
+        if state.get("is_finished") or status in ("completed", "completed_with_rename_warning", "completed_with_download_warning", "error"):
             return state
 
     return {"status": "timeout", "error": f"超过 {max_wait}s 未完成"}
-
 
 
 async def main():
     print("=" * 60)
     print("  MCP video_create 集成测试")
     print("=" * 60)
-    print(f"  project_id  : {PROJECT_ID}")
+    print(f"  project_id  : {PROJECT_ID!r} (留空自动选用最近项目)")
     print(f"  prompt      : {PROMPT}")
     print(f"  video_name  : {VIDEO_NAME}")
     print(f"  model_name  : {MODEL_NAME}")
@@ -82,6 +81,7 @@ async def main():
     print(f"  resolution  : {RESOLUTION}")
     print(f"  duration    : {DURATION}")
     print(f"  quantity    : {QUANTITY}")
+    print(f"  download    : {DOWNLOAD}")
     print("=" * 60)
 
     async with stdio_client(SERVER_PARAMS) as (read, write):
@@ -97,13 +97,13 @@ async def main():
                 assert required in tool_names, f"❌ 工具 {required} 未注册！"
 
             # 2. 调用 video_create
-            print(f"\n🚀 调用 video_create (超时限制: 7分钟)...")
+            print(f"\n🚀 调用 video_create (模式: {MODE}, 超时限制: 7分钟)...")
             t0 = time.time()
             create_result = await session.call_tool(
                 "video_create",
                 arguments={
-                    "project_id":   PROJECT_ID,
                     "prompt":       PROMPT,
+                    "project_id":   PROJECT_ID,
                     "video_name":   VIDEO_NAME,
                     "model_name":   MODEL_NAME,
                     "mode":         MODE,
@@ -114,6 +114,7 @@ async def main():
                     "resolution":   RESOLUTION,
                     "duration":     DURATION,
                     "quantity":     QUANTITY,
+                    "download":     DOWNLOAD,
                 },
             )
             raw_create = create_result.content[0].text
@@ -130,12 +131,15 @@ async def main():
             print(f"\n{'='*60}")
 
             is_ok = (
-                final.get("status") in ("completed", "completed_with_rename_warning")
+                final.get("status") in ("completed", "completed_with_rename_warning", "completed_with_download_warning")
+                and final.get("is_finished") is True
                 and bool(final.get("video_url"))
             )
 
             if is_ok:
                 print(f"✅ 测试通过！耗时 {elapsed:.1f}s")
+                if final.get("video_local_path"):
+                    print(f"   video_local_path: {final.get('video_local_path')}")
                 print(f"   详情: {json.dumps(final, indent=2, ensure_ascii=False)}")
             else:
                 print(f"❌ 测试失败！耗时 {elapsed:.1f}s")

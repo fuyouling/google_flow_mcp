@@ -54,6 +54,9 @@ class TaskPayload(BaseModel):
     project_alias: str
     params: Dict[str, Any] = Field(default_factory=dict)
     required_assets: List[str] = Field(default_factory=list)
+    cost_credits: int = 0
+    deducted_daily_free: int = 0
+    deducted_balance: int = 0
     created_at: float = Field(default_factory=time.time)
     retry_count: int = 0
     target_worker_id: Optional[str] = None
@@ -73,6 +76,8 @@ class WorkerInfo(BaseModel):
     worker_id: str
     ip: str = "127.0.0.1"
     account: str = ""
+    credits: Optional[int] = None
+    daily_free_remaining: int = 50
     state: WorkerState = WorkerState.IDLE
     current_job_id: Optional[str] = None
     project_mappings: Dict[str, str] = Field(default_factory=dict)

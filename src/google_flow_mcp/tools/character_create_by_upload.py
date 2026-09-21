@@ -26,12 +26,12 @@ def format_character_name(name: str) -> str:
 def register_character_create_by_upload_tool(mcp: FastMCP) -> None:
     @mcp.tool()
     def character_create_by_upload(
-        project_id: Annotated[str, Field(description="Google Flow 项目的唯一 ID")],
         character_name: Annotated[str, Field(description="要创建的虚拟角色名称（必填项）。如果名称中包含空格，系统会自动将空格统一转换为下划线 '_' 进行保存（例如 'Test Hero' 将转为 'Test_Hero'）")],
         portrait_image_path: Annotated[str, Field(description="头像图片的本地绝对路径")],
         fullbody_image_path: Annotated[str, Field(description="全身像图片的本地绝对路径（可选），若提供则上传全身像")] = "",
         voice_name: Annotated[str, Field(description="角色的声音名称，例如 'Journey' 等，留空则不设置")] = "",
-        voice_style: Annotated[str, Field(description="角色的声音风格，留空则不设置")] = ""
+        voice_style: Annotated[str, Field(description="角色的声音风格，留空则不设置")] = "",
+        project_id: Annotated[str, Field(description="Google Flow 项目的唯一 ID 或名称，留空则自动选用最近访问的项目")] = "",
     ) -> str:
         """
         通过上传本地已有图片在 Google Flow 中创建一个新的虚拟角色（头像必传，全身像选传）。
@@ -60,12 +60,27 @@ def register_character_create_by_upload_tool(mcp: FastMCP) -> None:
                 "message": f"头像图片文件不存在: {portrait_image_path}"
             }, ensure_ascii=False)
 
-        if fullbody_image_path and not Path(fullbody_image_path).is_file():
+        p_fullbody = Path(fullbody_image_path)
+        if fullbody_image_path and not p_fullbody.is_file():
             return json.dumps({
                 "status": "error",
                 "error": f"Fullbody image file not found: {fullbody_image_path}",
-                "message": f"全身像图片文件不存在: {fullbody_image_path}"
+                "message": f"待上传全身像图片文件不存在: {fullbody_image_path}"
             }, ensure_ascii=False)
+
+        # 0. Resolve empty project_id to the most recently accessed project
+        if not project_id or not project_id.strip():
+            from google_flow_mcp.models.project_cache import ProjectCache
+            local_projs = ProjectCache.load().get("projects", {})
+            if local_projs:
+                project_id = max(
+                    local_projs.keys(),
+                    key=lambda k: local_projs[k].get("last_accessed", "")
+                )
+                logger.info(f"character_create_by_upload: project_id not provided, defaulting to latest project: {project_id}")
+            else:
+                project_id = "default"
+
         job_id = str(uuid.uuid4())
         initial_state = {
             "job_id": job_id,
@@ -139,12 +154,21 @@ def register_character_create_by_upload_tool(mcp: FastMCP) -> None:
                     "message": f"虚拟角色上传创建失败: {str(e)}"
                 }
 
+        task_params = {
+            "project_id": project_id,
+            "character_name": formatted_name,
+            "portrait_image_path": portrait_image_path,
+            "fullbody_image_path": fullbody_image_path,
+            "voice_name": voice_name,
+            "voice_style": voice_style,
+        }
         submit_result = task_manager.submit_task(
-            task_type="character",
+            task_type="character_upload",
             job_id=job_id,
             initial_state=initial_state,
             worker_fn=task_worker,
             project_id=project_id,
-            task_name=f"upload_{character_name}"
+            task_name=f"upload_{formatted_name}",
+            params=task_params,
         )
         return json.dumps(submit_result, ensure_ascii=False)

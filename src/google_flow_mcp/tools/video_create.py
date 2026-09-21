@@ -287,11 +287,11 @@ def input_prompt(page, prompt: str) -> None:
 def register_video_create_tool(mcp: FastMCP) -> None:
     @mcp.tool()
     def video_create(
-        project_id: Annotated[str, Field(description="Google Flow 项目的唯一 ID，视频将创建在该项目内")],
         prompt: Annotated[str, Field(description="视频生成的提示词 (Prompt)，详细描述视频画面、主体动作、镜头运镜及光影风格")],
+        project_id: Annotated[str, Field(description="Google Flow 项目的唯一 ID 或名称，视频将创建在该项目内。留空则自动使用最近访问的项目")] = "",
         video_name: Annotated[str, Field(description="生成的视频重命名名称，便于在项目素材库中检索与引用。留空则自动生成随机名称")] = "",
         model_name: Annotated[str, Field(description="生成视频的模型名称。可选: 'Omni 1.1 Flash' (支持调节分辨率与时长，支持在素材模式下引用参考素材), 'Veo 3.1 - Lite', 'Veo 3.1 - Fast', 'Veo 3.1 - Quality' (电影级高画质与运镜；【极重要限制】Veo 模型除了帧模式可添加首帧与尾帧之外，不能再添加其它素材作为参考；在素材模式时添加素材作为参考，Veo 模型不会引用，引用素材请选择 Omni 模型)")] = "Omni 1.1 Flash",
-        mode: Annotated[str, Field(description="生成模式: 'frame' (首尾帧模式，需提供 start_frame 和 end_frame，Veo 与 Omni 均支持) 或 'asset' (素材参考/纯文本模式，若 assets 留空则为纯文生视频；若提供 assets，仅 Omni 模型支持引用素材，Veo 模型在素材模式下不会引用参考素材)")] = "frame",
+        mode: Annotated[str, Field(description="生成模式: 'asset' (素材参考/纯文本模式，默认模式，若 assets 留空则为纯文本生视频；若提供 assets 则基于参考素材生视频，仅 Omni 模型支持引用素材) 或 'frame' (首尾帧模式，需同时提供 start_frame 和 end_frame)")] = "asset",
         start_frame: Annotated[str, Field(description="[仅帧模式] 首帧图片名称，必须为该项目中已存在的图片资源 (Veo 和 Omni 均支持添加首帧)")] = "",
         end_frame: Annotated[str, Field(description="[仅帧模式] 尾帧图片名称，必须为该项目中已存在的图片资源 (Veo 和 Omni 均支持添加尾帧)")] = "",
         assets: Annotated[str, Field(description="[仅素材模式] 逗号分隔的参考素材名称列表(项目中已有资源)。【重要限制】仅 Omni 1.1 Flash 模型支持引用素材生视频；Veo 系列模型在素材模式下添加素材不会被模型引用，若使用 Veo 模型请将 assets 留空作纯文生视频，若需引用素材作为参考请使用 Omni 1.1 Flash 模型")] = "",
@@ -305,7 +305,7 @@ def register_video_create_tool(mcp: FastMCP) -> None:
         在 Google Flow 中发起后台视频生成任务。
         
         【一、 核心工作流与异步架构】
-        1. 前置条件：必须提供有效的 project_id；若使用首尾帧或参考素材，该图片/素材必须已存在于该项目中。
+        1. 前置条件：可提供 project_id，留空则自动选用最近访问的项目；若使用首尾帧或参考素材，该图片/素材必须已存在于该项目中。
         2. 异步执行与全局单任务队列：本工具在后台异步执行生成任务。全服务（视频/图片/角色）共用单一浏览器，同一时刻仅允许一个任务处于生成中。若当前空闲则立即启动（status='started'）；若已有任务在生成中，将自动进入全局 FIFO 排队队列（status='queued'），前置任务完成后自动顺序执行。智能体【严禁】因看到 queued 而重复调用创建工具！可调用 `task_queue_status` 查看全局队列，或使用 `task_cancel(job_id)` 取消任务。
         3. 状态轮询：视频生成通常耗时 1~3 分钟（最大超时 5 分钟），智能体【必须】使用返回的 job_id 定期调用 `video_status` 工具轮询状态（建议每隔 5~10 秒轮询一次）。
         4. 结束判定：智能体必须根据 `video_status` 返回的 `is_finished` 字段判定任务是否结束：
@@ -313,15 +313,15 @@ def register_video_create_tool(mcp: FastMCP) -> None:
            - 若 `is_finished == True`：任务已彻底完成（或失败），智能体方可停止轮询，并向用户展示视频链接、本地下载文件路径或错误信息。
         
         【二、 两大生成模式与参数互斥规则】
-        1. 首尾帧模式 (mode='frame')：
-           - 适用场景：指定起始图与结束图，让 AI 生成两张图之间的动作过渡/插值动画。Veo 系列模型与 Omni 均支持。
-           - 必需参数：必须同时提供 start_frame 和 end_frame（项目内已有的图片资源名称）。
-           - 互斥与素材限制：【严禁】传递 assets 参数（否则触发 ValidationError 报错）。【重要】对于 Veo 模型，除了首帧和尾帧之外，不能再添加任何其它素材作为参考。
-        2. 素材参考 / 纯文本模式 (mode='asset')：
+        1. 素材参考 / 纯文本模式 (mode='asset'，默认)：
            - 纯文本生视频 (Text-to-Video)：mode='asset' 且 assets="" 留空，仅依靠 prompt 纯文本描述生成。Omni 和 Veo 模型均完美支持。
            - 素材参考生视频 (Asset-to-Video)：mode='asset' 且 assets 提供逗号分隔的已有素材名称。
              【极重要说明 - Veo 模型素材限制】：在素材模式下添加素材作为参考时，Veo 系列模型（Veo 3.1 - Lite / Fast / Quality）**不会引用该素材**！因此如果需要基于素材进行视频生成，智能体**必须且只能使用 Omni 1.1 Flash 模型**；若使用 Veo 模型，请保持 assets="" 留空进行纯文本生视频。
            - 互斥限制：【严禁】传递 start_frame 或 end_frame 参数（否则触发 ValidationError 报错）。
+        2. 首尾帧模式 (mode='frame')：
+           - 适用场景：指定起始图与结束图，让 AI 生成两张图之间的动作过渡/插值动画。Veo 系列模型与 Omni 均支持。
+           - 必需参数：必须同时提供 start_frame 和 end_frame（项目内已有的图片资源名称）。
+           - 互斥与素材限制：【严禁】传递 assets 参数（否则触发 ValidationError 报错）。【重要】对于 Veo 模型，除了首帧和尾帧之外，不能再添加任何其它素材作为参考。
         
         【三、 支持的模型系列与参数差异】
         1. 'Omni 1.1 Flash'：
@@ -341,14 +341,27 @@ def register_video_create_tool(mcp: FastMCP) -> None:
         
         【五、 智能体典型调用场景示例】
         - 场景 1：纯文生视频 (Omni 720p 8秒横屏 + 本地 1080p 下载)
-          video_create(project_id="...", prompt="...", model_name="Omni 1.1 Flash", mode="asset", assets="", aspect_ratio="16:9", resolution="720p", duration=8, download="1080p")
+          video_create(prompt="一只金毛小狗在沙滩奔跑", model_name="Omni 1.1 Flash", download="1080p")
         - 场景 2：首尾帧过渡视频 (Veo 3.1 Fast 帧动画)
-          video_create(project_id="...", prompt="...", model_name="Veo 3.1 - Fast", mode="frame", start_frame="sunny_landscape", end_frame="snowy_landscape", aspect_ratio="16:9")
-        - 场景 3：参考已有素材生视频 (Omni 1.1 Flash 竖屏 - 注意：Veo 不支持引用素材，引用素材必须使用 Omni)
-          video_create(project_id="...", prompt="...", model_name="Omni 1.1 Flash", mode="asset", assets="hero_portrait", aspect_ratio="9:16")
-        - 场景 4：Veo 高画质纯文本生视频 (Veo 3.1 Quality 横屏电影感，assets 留空)
-          video_create(project_id="...", prompt="...", model_name="Veo 3.1 - Quality", mode="asset", assets="", aspect_ratio="16:9")
+          video_create(prompt="从白天过渡到黑夜", model_name="Veo 3.1 - Fast", mode="frame", start_frame="sunny_landscape", end_frame="snowy_landscape", aspect_ratio="16:9")
+        - 场景 3：参考已有素材生视频 (Omni 1.1 Flash 竖屏)
+          video_create(prompt="角色转身微笑", model_name="Omni 1.1 Flash", mode="asset", assets="hero_portrait", aspect_ratio="9:16")
+        - 场景 4：Veo 高画质纯文本生视频 (Veo 3.1 Quality 横屏电影感)
+          video_create(prompt="赛博朋克雨夜街道", model_name="Veo 3.1 - Quality", aspect_ratio="16:9")
         """
+        # 0. Resolve empty project_id to the most recently accessed project
+        if not project_id or not project_id.strip():
+            from google_flow_mcp.models.project_cache import ProjectCache
+            local_projs = ProjectCache.load().get("projects", {})
+            if local_projs:
+                project_id = max(
+                    local_projs.keys(),
+                    key=lambda k: local_projs[k].get("last_accessed", "")
+                )
+                logger.info(f"video_create: project_id not provided, defaulting to latest project: {project_id}")
+            else:
+                project_id = "default"
+
         # 1. Parameter validation
         if download and download.strip().lower() not in ("270p", "720p", "1080p"):
             return json.dumps({

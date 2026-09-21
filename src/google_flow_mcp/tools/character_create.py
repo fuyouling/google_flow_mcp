@@ -18,9 +18,9 @@ _jobs = task_manager.jobs
 def register_character_create_tool(mcp: FastMCP) -> None:
     @mcp.tool()
     def character_create(
-        project_id: Annotated[str, Field(description="Google Flow 项目的唯一 ID")],
         character_name: Annotated[str, Field(description="要创建的虚拟角色名称")],
         portrait_prompt: Annotated[str, Field(description="生成角色头像（肖像）的提示词。你必须严格使用全英文并且遵守以下模板且为了保持头像与全身像的同一性服装的描述必须一致，仅替换中括号里的主体描述：'Medium studio shot of a [主体外貌、穿着特征描述]. perfectly centered, forward-facing. Captured with a Hasselblad H6D-100c and a 50mm lens. The skin is rendered with biological realism, featuring natural textures. Clamshell lighting with a bottom silver reflector creates a luminous glow. The composition is a head and shoulders shot with clear headroom, ensuring the character's full head is entirely within the frame and not cropped by the top border against a seamless, solid white background.'")],
+        project_id: Annotated[str, Field(description="Google Flow 项目的唯一 ID 或名称，留空则自动选用最近访问的项目")] = "",
         fullbody_prompt: Annotated[str, Field(description="生成角色全身像的提示词，留空则不生成且为了保持头像与全身像的同一性服装的描述必须一致。如果需要生成，必须严格使用全英文并且遵守以下模板，仅替换中括号里的主体描述（描述需与头像主体一致）：'Full-body character design sheet, featuring a triptych of three different angles: front view, three-quarter view, and back view. High resolution, flat studio lighting, consistent body proportions across all views, solid white background. [主体外貌、穿着特征描述]'")] = "",
         voice_name: Annotated[str, Field(description="角色的声音名称，例如 'Journey' 等，留空则不设置")] = "",
         voice_style: Annotated[str, Field(description="角色的声音风格，留空则不设置")] = "",
@@ -36,6 +36,18 @@ def register_character_create_tool(mcp: FastMCP) -> None:
         2. 若当前已有生成任务进行中，该任务将自动进入全局排队队列。
         3. 你**必须**使用 `character_status` 工具轮询这个 job_id 来获取最终的生成结果（包含本地下载路径，若 image_base64=True 还包含图片 base64 数据）。
         """
+        # 0. Resolve empty project_id to the most recently accessed project
+        if not project_id or not project_id.strip():
+            local_projs = ProjectCache.load().get("projects", {})
+            if local_projs:
+                project_id = max(
+                    local_projs.keys(),
+                    key=lambda k: local_projs[k].get("last_accessed", "")
+                )
+                logger.info(f"character_create: project_id not provided, defaulting to latest project: {project_id}")
+            else:
+                project_id = "default"
+
         job_id = str(uuid.uuid4())
         initial_state = {
             "job_id": job_id,
@@ -143,13 +155,25 @@ def register_character_create_tool(mcp: FastMCP) -> None:
                     "message": f"虚拟角色创建失败: {str(e)}"
                 }
 
+        task_params = {
+            "project_id": project_id,
+            "character_name": character_name,
+            "portrait_prompt": portrait_prompt,
+            "fullbody_prompt": fullbody_prompt,
+            "voice_name": voice_name,
+            "voice_style": voice_style,
+            "model_name": model_name,
+            "download": download,
+            "image_base64": image_base64,
+        }
         submit_result = task_manager.submit_task(
             task_type="character",
             job_id=job_id,
             initial_state=initial_state,
             worker_fn=task_worker,
             project_id=project_id,
-            task_name=character_name
+            task_name=character_name,
+            params=task_params,
         )
         return json.dumps(submit_result, ensure_ascii=False)
 

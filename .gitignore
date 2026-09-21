@@ -43,6 +43,8 @@ tmp/
 # App Data
 chrome_data/
 projects_cache.json
+account_cache.json
+*.tmp
 
 .agents/
 docs/

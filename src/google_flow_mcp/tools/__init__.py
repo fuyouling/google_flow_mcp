@@ -1,4 +1,4 @@
-from google_flow_mcp.tools.website_open import register_website_open_tool
+from google_flow_mcp.tools.website_open import register_website_open_tool, website_open
 from google_flow_mcp.tools.project_list import register_project_list_tool
 from google_flow_mcp.tools.project_open import register_project_open_tool
 from google_flow_mcp.tools.project_rename import register_project_rename_tool
@@ -23,6 +23,7 @@ from google_flow_mcp.tools.video_create_by_upload import (
 from google_flow_mcp.tools.video_list import register_video_list_tool
 
 __all__ = [
+    "website_open",
     "register_website_open_tool",
     "register_project_list_tool",
     "register_project_open_tool",

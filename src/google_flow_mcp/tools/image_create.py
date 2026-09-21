@@ -77,8 +77,8 @@ def apply_image_settings(page, aspect_ratio="16:9", model_name="Nano Banana Pro"
 def register_image_create_tool(mcp: FastMCP) -> None:
     @mcp.tool()
     def image_create(
-        project_id: Annotated[str, Field(description="Google Flow 项目的唯一 ID")],
         prompt: Annotated[str, Field(description="生成图片的提示词")],
+        project_id: Annotated[str, Field(description="Google Flow 项目的唯一 ID 或名称，留空则自动选用最近访问的项目")] = "",
         assets: Annotated[str, Field(description="可选的参考素材名称，多个用逗号分隔")] = "",
         image_name: Annotated[str, Field(description="生成后的图片重命名名称，留空则自动生成")] = "",
         aspect_ratio: Annotated[str, Field(description="图片宽高比，例如 '16:9' 或 '9:16'")] = "16:9",
@@ -106,6 +106,18 @@ def register_image_create_tool(mcp: FastMCP) -> None:
                 "message": f"不支持的下载分辨率: {download!r}。仅支持 '1K' 或 '2K'，留空则不下载。",
                 "next_action": "参数错误，任务未启动，智能体请修正 download 参数后重新调用。"
             }, ensure_ascii=False)
+
+        # 0. Resolve empty project_id to the most recently accessed project
+        if not project_id or not project_id.strip():
+            local_projs = ProjectCache.load().get("projects", {})
+            if local_projs:
+                project_id = max(
+                    local_projs.keys(),
+                    key=lambda k: local_projs[k].get("last_accessed", "")
+                )
+                logger.info(f"image_create: project_id not provided, defaulting to latest project: {project_id}")
+            else:
+                project_id = "default"
 
         job_id = str(uuid.uuid4())
         _jobs[job_id] = {
@@ -428,13 +440,27 @@ def register_image_create_tool(mcp: FastMCP) -> None:
                     "next_action": "任务执行失败，智能体请停止轮询，可向用户汇报具体失败原因。"
                 }
 
+        task_params = {
+            "project_id": project_id,
+            "prompt": prompt,
+            "assets": assets,
+            "image_name": image_name,
+            "aspect_ratio": aspect_ratio,
+            "model_name": model_name,
+            "quantity": quantity,
+            "download": download,
+        }
+        required_assets = [a.strip() for a in assets.split(",") if a.strip()] if assets else []
+
         submit_res = task_manager.submit_task(
             task_type="image",
             job_id=job_id,
             initial_state=_jobs[job_id],
             worker_fn=task_worker,
             project_id=project_id,
-            task_name=image_name or f"image_{job_id[:8]}"
+            task_name=image_name or f"image_{job_id[:8]}",
+            params=task_params,
+            required_assets=required_assets,
         )
         if submit_res.get("status") == "started":
             submit_res.update({

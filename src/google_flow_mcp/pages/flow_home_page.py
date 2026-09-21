@@ -1,9 +1,11 @@
 from loguru import logger
 from DrissionPage import ChromiumPage
 from DrissionPage.common import Keys
+from typing import Optional
 from google_flow_mcp.pages.base_page import BasePage
 from google_flow_mcp.models.project_cache import ProjectCache
 import re
+import time
 
 class FlowHomePage(BasePage):
     """
@@ -131,18 +133,24 @@ class FlowHomePage(BasePage):
         Click the new project button, wait for navigation, and return the new UUID.
         """
         logger.info("Clicking new project button...")
-        new_btn = self.tab.ele('css:button.new-project-button')
+        new_btn = self.tab.ele('css:button.new-project-button') or self.tab.ele('xpath://button[contains(., "新建项目") or contains(., "New project")]', timeout=3)
         if not new_btn:
             raise Exception("Could not find the 'New Project' button on the home page.")
             
         new_btn.click()
         
         # Wait for navigation to /project/
-        self.tab.wait.url_change(self.URL, timeout=10)
-        
-        # The URL should now be something like https://flow.google.com/project/UUID
+        start_time = time.time()
+        timeout = 15
+        match = None
         current_url = self.tab.url
-        match = re.search(r'/project/([a-zA-Z0-9\-]+)', current_url)
+        while time.time() - start_time < timeout:
+            current_url = self.tab.url
+            match = re.search(r'/project/([a-zA-Z0-9\-]+)', current_url)
+            if match:
+                break
+            time.sleep(0.5)
+        
         if match:
             new_id = match.group(1)
             logger.info(f"New project created with UUID: {new_id}")
@@ -150,4 +158,62 @@ class FlowHomePage(BasePage):
             ProjectCache.update_project(new_id, "Untitled project", current_url)
             return new_id
         else:
-            raise Exception(f"Failed to extract project ID from URL: {current_url}")
+            raise Exception(f"Failed to extract project ID from URL after waiting {timeout}s: {current_url}")
+
+    def get_credits(self) -> Optional[int]:
+        """
+        从 Google Flow 首页账号详情面板中获取剩余点数。
+
+        操作流程：
+        1. 点击 aria-label="账号详情" 的 div 展开账号面板
+        2. 读取 class="credits-count" 的 span 文本（如 "556 个 Google Flow 点数" 或 "1,250"）
+        3. 正则提取数字（支持千分位逗号）
+        4. 点击 aria-label="关闭账号面板" 的按钮关闭面板
+
+        Returns:
+            int: 剩余点数，失败时返回 None。
+        """
+        import time
+
+        panel_opened = False
+        try:
+            # 1. 点击账号详情按钮展开面板
+            account_btn = self.tab.ele('xpath://div[@aria-label="账号详情" or @aria-label="Account details"]', timeout=5)
+            if not account_btn:
+                logger.warning("get_credits: 未找到账号详情按钮 (xpath://div[@aria-label='账号详情'])")
+                return None
+            account_btn.click()
+            panel_opened = True
+            time.sleep(0.8)  # 等待面板展开动画
+
+            # 2. 读取点数文本，例如 "556 个 Google Flow 点数" 或 "1,250 个 Google Flow 点数"
+            credits_ele = self.tab.ele('xpath://span[contains(@class, "credits-count")]', timeout=5)
+            if not credits_ele:
+                logger.warning("get_credits: 未找到点数元素 (xpath://span[contains(@class, 'credits-count')])")
+                return None
+
+            text = credits_ele.text or ""
+            # 支持提取包含逗号的数字串，如 "1,250"
+            match = re.search(r"([\d,]+)", text)
+            credits = int(match.group(1).replace(",", "")) if match else None
+            if credits is not None:
+                logger.info(f"get_credits: 获取到点数 = {credits} (原文: '{text}')")
+            else:
+                logger.warning(f"get_credits: 无法从文本中提取数字: '{text}'")
+
+            return credits
+
+        except Exception as e:
+            logger.warning(f"get_credits 执行失败: {e}")
+            return None
+
+        finally:
+            # 3. 仅当成功展开了账号面板时才尝试关闭，避免面板未打开时额外等待超时
+            if panel_opened:
+                try:
+                    close_btn = self.tab.ele('xpath://button[@aria-label="关闭账号面板" or @aria-label="Close account panel"]', timeout=3)
+                    if close_btn:
+                        close_btn.click()
+                        logger.debug("get_credits: 账号面板已关闭")
+                except Exception as close_err:
+                    logger.debug(f"get_credits: 关闭账号面板时出现异常（忽略）: {close_err}")

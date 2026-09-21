@@ -1,13 +1,18 @@
+import asyncio
 import io
+import json
 import tempfile
+import time
 from pathlib import Path
+
 import pytest
 from starlette.testclient import TestClient
 
 from google_flow_mcp.cluster.asset_hub import AssetHub
 from google_flow_mcp.cluster.master_server import MasterServer
-from google_flow_mcp.cluster.models import AssetType, TaskType
+from google_flow_mcp.cluster.models import AssetType, TaskType, TaskPayload
 from google_flow_mcp.cluster.scheduler import ClusterScheduler
+from google_flow_mcp.cluster.proto import cluster_pb2
 
 
 @pytest.fixture
@@ -15,14 +20,27 @@ def cluster_env():
     with tempfile.TemporaryDirectory() as tmp_dir:
         hub = AssetHub(base_dir=Path(tmp_dir))
         scheduler = ClusterScheduler()
-        server = MasterServer(scheduler=scheduler, asset_hub=hub)
-        client = TestClient(server.app)
+        # Fast startup using port 0 for random free port allocation
+        server = MasterServer(
+            scheduler=scheduler,
+            asset_hub=hub,
+            host="127.0.0.1",
+            grpc_port=0,
+            http_port=0,
+        )
+        # Note: We must use a real server start to get the actual ports allocated
+        server.start()
+        time.sleep(0.5)
+
+        client = TestClient(server._fastapi_app)
         yield {
             "hub": hub,
             "scheduler": scheduler,
             "server": server,
             "client": client,
         }
+        
+        server.stop()
         scheduler.stop()
 
 
@@ -65,51 +83,3 @@ def test_cluster_status_endpoint(cluster_env):
     assert data["worker_count"] == 1
     assert data["workers"][0]["worker_id"] == "worker_alpha"
 
-
-def test_worker_websocket_lifecycle(cluster_env):
-    client = cluster_env["client"]
-    scheduler = cluster_env["scheduler"]
-
-    with client.websocket_connect("/ws/worker") as ws:
-        # 1. Registration handshake
-        ws.send_json({
-            "action": "register",
-            "worker_id": "ws_worker_test",
-            "account": "test@gmail.com",
-            "cached_assets": ["cached_1"],
-        })
-        ack = ws.receive_json()
-        assert ack["action"] == "registered"
-        assert ack["worker_id"] == "ws_worker_test"
-
-        # Check worker in scheduler
-        workers = scheduler.get_workers()
-        assert any(w.worker_id == "ws_worker_test" for w in workers)
-
-        # 2. Submit task from Master and receive over WS
-        job_id = scheduler.submit_task(
-            task_type=TaskType.VIDEO_CREATE,
-            project_alias="test_proj",
-            params={"prompt": "generate flowers"},
-        )
-
-        task_msg = ws.receive_json()
-        assert task_msg["action"] == "execute"
-        assert task_msg["payload"]["job_id"] == job_id
-
-        # 3. Report completion over WS
-        ws.send_json({
-            "action": "completed",
-            "result": {
-                "job_id": job_id,
-                "worker_id": "ws_worker_test",
-                "status": "completed",
-                "result_data": {"video_url": "https://flow.google.com/vid/123"},
-                "produced_assets": [],
-            },
-        })
-
-        # Wait briefly for scheduler to process
-        import time
-        time.sleep(0.1)
-        assert scheduler.jobs[job_id]["status"] == "completed"

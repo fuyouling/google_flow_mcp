@@ -1,0 +1,97 @@
+syntax = "proto3";
+
+package google_flow_mcp.cluster;
+
+// ─── 服务定义 ───────────────────────────────────────────────
+
+service ClusterService {
+  // Worker 注册后建立双向流：
+  //   Worker → Master: 注册、心跳、进度、完成、失败等
+  //   Master → Worker: 任务指派、取消指令
+  rpc StreamTasks(stream WorkerMessage) returns (stream MasterMessage);
+}
+
+// ─── Worker → Master 消息 ───────────────────────────────────
+
+message WorkerMessage {
+  oneof payload {
+    RegisterRequest register = 1;
+    HeartbeatRequest heartbeat = 2;
+    TaskProgressReport progress = 3;
+    TaskCompletedReport completed = 4;
+    TaskFailedReport failed = 5;
+    ProjectMappingUpdate project_mapping = 6;
+    AccountInfoUpdate account_info = 7;
+  }
+}
+
+message RegisterRequest {
+  string worker_id = 1;
+  string account = 2;
+  map<string, string> project_mappings = 3;
+  repeated string cached_assets = 4;
+}
+
+message HeartbeatRequest {
+  string worker_id = 1;
+}
+
+message TaskProgressReport {
+  string job_id = 1;
+  string status = 2;
+  string message = 3;
+  int32  progress_percent = 4;
+  string progress_text = 5;
+  double elapsed_seconds = 6;
+  string next_action = 7;
+}
+
+message TaskCompletedReport {
+  string job_id = 1;
+  string worker_id = 2;
+  string status = 3;
+  // TaskResult serialized as JSON (dynamic dict fields)
+  string result_json = 4;
+}
+
+message TaskFailedReport {
+  string job_id = 1;
+  string worker_id = 2;
+  string error = 3;
+}
+
+message ProjectMappingUpdate {
+  string worker_id = 1;
+  string project_alias = 2;
+  string local_uuid = 3;
+}
+
+message AccountInfoUpdate {
+  string worker_id = 1;
+  string email = 2;
+  optional int32 credits = 3;
+}
+
+// ─── Master → Worker 消息 ───────────────────────────────────
+
+message MasterMessage {
+  oneof payload {
+    RegisterResponse registered = 1;
+    ExecuteTask execute = 2;
+    CancelTask cancel = 3;
+  }
+}
+
+message RegisterResponse {
+  string worker_id = 1;
+  bool success = 2;
+}
+
+message ExecuteTask {
+  // TaskPayload serialized as JSON (dynamic dict fields)
+  string payload_json = 1;
+}
+
+message CancelTask {
+  string job_id = 1;
+}

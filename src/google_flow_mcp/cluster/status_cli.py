@@ -61,34 +61,42 @@ def format_status_table(master_url: str, data: Dict[str, Any]) -> str:
     workers = data.get("workers", [])
 
     lines = []
-    lines.append("=" * 76)
+    lines.append("=" * 86)
     lines.append("                 Google Flow MCP 集群实时监控面板")
-    lines.append("=" * 76)
+    lines.append("=" * 86)
     lines.append(f" Master 节点地址 : {master_url}")
     lines.append(f" 在线从机数量   : {worker_count} 台")
     lines.append(f" 任务排队中     : {pending_tasks} 个")
     lines.append(f" 任务执行中     : {active_tasks} 个")
-    lines.append("-" * 76)
+    lines.append("-" * 86)
 
     if not workers:
         lines.append(" [!] 当前没有已连接的 Worker 从机节点。")
     else:
         # 表头
         lines.append(
-            f"{'节点 ID':<22} {'账号/身份':<20} {'状态':<10} {'当前执行任务':<14} {'已缓存素材'}"
+            f"{'节点 ID':<18} {'账号/身份':<18} {'状态':<8} {'积分(今日剩余/总分)':<22} {'当前执行任务':<12} {'已缓存素材'}"
         )
-        lines.append("-" * 76)
+        lines.append("-" * 86)
         for w in workers:
             w_id = str(w.get("worker_id", "unknown"))
-            if len(w_id) > 20:
-                w_id = w_id[:18] + ".."
+            if len(w_id) > 16:
+                w_id = w_id[:14] + ".."
             account = str(w.get("account") or "-")
-            if len(account) > 18:
-                account = account[:16] + ".."
+            if len(account) > 16:
+                account = account[:14] + ".."
             state = str(w.get("state", "idle")).upper()
             curr_job = str(w.get("current_job_id") or "-")
-            if len(curr_job) > 12:
-                curr_job = curr_job[:10] + ".."
+            if len(curr_job) > 10:
+                curr_job = curr_job[:8] + ".."
+
+            credits_val = w.get("credits")
+            daily_free_val = w.get("daily_free_remaining", 50)
+            if credits_val is not None:
+                credits_info = f"{daily_free_val}/{credits_val} pt (今剩{daily_free_val})"
+            else:
+                credits_info = f"{daily_free_val}/- pt (今剩{daily_free_val})"
+
             cached = w.get("cached_assets", [])
             cached_count = len(cached) if isinstance(cached, list) else 0
             cached_info = f"{cached_count} 个"
@@ -99,10 +107,10 @@ def format_status_table(master_url: str, data: Dict[str, Any]) -> str:
                 cached_info = f"{cached_count} ({preview})"
 
             lines.append(
-                f"{w_id:<22} {account:<20} {state:<10} {curr_job:<14} {cached_info}"
+                f"{w_id:<18} {account:<18} {state:<8} {credits_info:<22} {curr_job:<12} {cached_info}"
             )
 
-    lines.append("=" * 76)
+    lines.append("=" * 86)
     return "\n".join(lines)
 
 

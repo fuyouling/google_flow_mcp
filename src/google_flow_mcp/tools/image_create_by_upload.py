@@ -24,9 +24,9 @@ def format_image_name(name: str) -> str:
 def register_image_create_by_upload_tool(mcp: FastMCP) -> None:
     @mcp.tool()
     def image_create_by_upload(
-        project_id: Annotated[str, Field(description="Google Flow 项目的唯一 ID")],
+        project_id: Annotated[str, Field(description="Google Flow 项目的唯一 ID 或名称，留空则自动选用最近访问的项目")],
         image_path: Annotated[str, Field(description="待上传图片的本地绝对路径")],
-        image_name: Annotated[str, Field(description="上传后的图片重命名名称（必填项）。名称中的所有空格将被自动统一替换为下划线 '_' 进行保存（例如 'My Picture' 将自动转为 'My_Picture'）")]
+        image_name: Annotated[str, Field(description="上传后的图片重命名名称（必填项）。名称中的所有空格将被自动统一替换为下划线 '_' 进行保存（例如 'My Picture' 将转为 'My_Picture'）")],
     ) -> str:
         """
         通过在项目主页上传本地已有图片创建图片媒体资产并重命名保存。
@@ -54,6 +54,19 @@ def register_image_create_by_upload_tool(mcp: FastMCP) -> None:
                 "error": f"Image file not found: {image_path}",
                 "message": f"待上传图片文件不存在: {image_path}"
             }, ensure_ascii=False)
+
+        # 0. Resolve empty project_id to the most recently accessed project
+        if not project_id or not project_id.strip():
+            from google_flow_mcp.models.project_cache import ProjectCache
+            local_projs = ProjectCache.load().get("projects", {})
+            if local_projs:
+                project_id = max(
+                    local_projs.keys(),
+                    key=lambda k: local_projs[k].get("last_accessed", "")
+                )
+                logger.info(f"image_create_by_upload: project_id not provided, defaulting to latest project: {project_id}")
+            else:
+                project_id = "default"
 
         job_id = str(uuid.uuid4())
         initial_state = {
@@ -101,12 +114,18 @@ def register_image_create_by_upload_tool(mcp: FastMCP) -> None:
                     "message": f"图片上传创建失败: {str(e)}"
                 }
 
+        task_params = {
+            "project_id": project_id,
+            "image_path": image_path,
+            "image_name": formatted_name,
+        }
         submit_result = task_manager.submit_task(
-            task_type="image",
+            task_type="image_upload",
             job_id=job_id,
             initial_state=initial_state,
             worker_fn=task_worker,
             project_id=project_id,
-            task_name=f"upload_{image_name}"
+            task_name=f"upload_{formatted_name}",
+            params=task_params,
         )
         return json.dumps(submit_result, ensure_ascii=False)

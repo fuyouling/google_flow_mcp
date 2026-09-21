@@ -97,12 +97,12 @@ def main() -> None:
         primary_ip = lan_ips[0] if lan_ips else "127.0.0.1"
 
         logger.info(
-            f"Initializing Cluster Master on {settings.cluster_master_host}:{settings.cluster_master_port}..."
+            f"Initializing Cluster Master: gRPC :{settings.cluster_grpc_port}, HTTP :{settings.cluster_master_port}..."
         )
         logger.info(
-            f"Cluster Master active on 0.0.0.0:{settings.cluster_master_port} (LAN IP: {primary_ip})"
+            f"Cluster Master active (LAN IP: {primary_ip})"
         )
-        logger.info(f"Workers can connect to: http://{primary_ip}:{settings.cluster_master_port}")
+        logger.info(f"Workers connect gRPC: {primary_ip}:{settings.cluster_grpc_port}, HTTP: http://{primary_ip}:{settings.cluster_master_port}")
 
         asset_hub = AssetHub(Path(settings.cluster_asset_dir))
         cluster_scheduler = ClusterScheduler()
@@ -110,7 +110,8 @@ def main() -> None:
             scheduler=cluster_scheduler,
             asset_hub=asset_hub,
             host=settings.cluster_master_host,
-            port=settings.cluster_master_port,
+            grpc_port=settings.cluster_grpc_port,
+            http_port=settings.cluster_master_port,
         )
         master_server.start()
 
@@ -122,10 +123,24 @@ def main() -> None:
             master_url=f"http://127.0.0.1:{settings.cluster_master_port}",
             worker_id=settings.worker_id,
             account=settings.worker_account,
+            grpc_target=f"127.0.0.1:{settings.cluster_grpc_port}",
         )
         threading.Thread(
             target=local_worker.run_forever, daemon=True, name="MasterLocalWorker"
         ).start()
+
+        if settings.auto_launch_browser:
+            def _prewarm_browser() -> None:
+                try:
+                    logger.info("Auto-launching browser via website_open in background...")
+                    from google_flow_mcp.tools.website_open import website_open
+                    website_open()
+                except Exception as e:
+                    logger.warning(f"Failed to auto-launch browser on startup: {e}")
+
+            threading.Thread(
+                target=_prewarm_browser, daemon=True, name="BrowserPrewarm"
+            ).start()
 
         atexit.register(master_server.stop)
         atexit.register(local_worker.stop)

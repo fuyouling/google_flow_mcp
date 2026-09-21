@@ -58,7 +58,10 @@ def test_video_list_when_browser_busy(tmp_path, monkeypatch):
         assert data["videos"][0]["name"] == "已缓存视频"
 
 
-def test_video_list_no_videos_button(monkeypatch):
+def test_video_list_no_videos_button(tmp_path, monkeypatch):
+    test_cache_file = str(tmp_path / "test_projects_cache.json")
+    monkeypatch.setattr("google_flow_mcp.models.project_cache.CACHE_FILE", test_cache_file)
+
     from google_flow_mcp.tools.video_list import register_video_list_tool
     mock_mcp = MagicMock()
     tool_func = None

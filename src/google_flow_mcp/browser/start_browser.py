@@ -36,30 +36,11 @@ import psutil
 from DrissionPage import Chromium
 from loguru import logger
 
-from google_flow_mcp.browser.session import _build_options
+from google_flow_mcp.browser.session import _build_options, set_browser
 from google_flow_mcp.config import get_settings
+from google_flow_mcp.tools.website_open import website_open
+from google_flow_mcp.browser.utils import is_port_in_use, get_process_by_port, stop_browser
 
-
-def is_port_in_use(port: int, host: str = "127.0.0.1") -> bool:
-    """检查指定端口是否处于监听状态。"""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.settimeout(0.5)
-        return s.connect_ex((host, port)) == 0
-
-
-def get_process_by_port(port: int) -> Optional[psutil.Process]:
-    """通过端口号查找占用该端口的进程。"""
-    try:
-        for conn in psutil.net_connections(kind="inet"):
-            if conn.laddr and conn.laddr.port == port and conn.status == psutil.CONN_LISTEN:
-                if conn.pid:
-                    try:
-                        return psutil.Process(conn.pid)
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        return None
-    except Exception as e:
-        logger.debug(f"psutil 查找端口出错: {e}")
-    return None
 
 
 def get_cdp_version(port: int = 9222, timeout: float = 2.0) -> Optional[Dict[str, Any]]:
@@ -87,34 +68,6 @@ def get_cdp_tabs(port: int = 9222, timeout: float = 2.0) -> List[Dict[str, Any]]
         return []
     return []
 
-
-def stop_browser(port: int = 9222) -> bool:
-    """关闭监听指定端口的浏览器进程树。"""
-    proc = get_process_by_port(port)
-    if not proc:
-        print(f"[-] 端口 {port} 未被占用，没有正在运行的浏览器。")
-        return True
-
-    try:
-        print(f"[*] 发现占用端口 {port} 的进程: PID={proc.pid}, Name={proc.name()}")
-        children = proc.children(recursive=True)
-        for child in children:
-            try:
-                child.terminate()
-            except psutil.NoSuchProcess:
-                pass
-        proc.terminate()
-        gone, alive = psutil.wait_procs(children + [proc], timeout=3)
-        for p in alive:
-            try:
-                p.kill()
-            except psutil.NoSuchProcess:
-                pass
-        print(f"[+] 成功停止端口 {port} 上的浏览器进程。")
-        return True
-    except Exception as e:
-        print(f"[!] 停止进程失败: {e}")
-        return False
 
 
 def check_status(port: int = 9222) -> None:
@@ -224,28 +177,36 @@ def launch_browser(
 
     try:
         browser = Chromium(addr_or_opts=options)
-        tab = browser.latest_tab
+        set_browser(browser)
 
-        current_url = getattr(tab, "url", "")
-        if not current_url or current_url.startswith("chrome://") or current_url == "about:blank":
-            print(f"[*] 导航到首页: {url}")
-            tab.get(url)
-        elif target_url and target_url != current_url:
-            print(f"[*] 打开指定页面: {target_url}")
-            tab.get(target_url)
+        # 4. 调用 website_open 打开目标网页并完成环境与账号初始化
+        print(f"[*] 正在调用 website_open 初始化浏览器环境 (URL: {url})...")
+        open_res_raw = website_open(url=url)
+        try:
+            open_res = json.loads(open_res_raw)
+        except Exception:
+            open_res = {"success": False, "error": str(open_res_raw)}
 
-        time.sleep(1.5)
-
-        # 4. 打印当前页面与登录态
-        login_info = check_login_status(tab)
         print("-" * 64)
-        print(f"当前页面标题: {login_info['title']}")
-        print(f"当前页面地址: {login_info['url']}")
-        if login_info["is_logged_in"]:
-            email_desc = f" ({login_info['account_email']})" if login_info["account_email"] else ""
-            print(f"Google 登录态: ✅ 已登录{email_desc}")
+        if open_res.get("success"):
+            data = open_res.get("data", {})
+            print(f"当前页面标题: {data.get('title', 'Unknown')}")
+            print(f"当前页面地址: {data.get('url', url)}")
+            if data.get("is_logged_in"):
+                email_desc = f" ({data.get('account_email')})" if data.get("account_email") else ""
+                credits_val = data.get("credits")
+                credits_desc = f" | 剩余点数: {credits_val} pt" if credits_val is not None else ""
+                print(f"Google 登录态: ✅ 已登录{email_desc}{credits_desc}")
+            else:
+                print("Google 登录态: ⚠️ 未登录 (如需在 MCP 中生成内容，请在此浏览器窗口完成登录)")
         else:
-            print("Google 登录态: ⚠️ 未登录 (如需在 MCP 中生成内容，请在此浏览器窗口完成登录)")
+            print(f"[!] website_open 初始化返回失败: {open_res.get('error')}")
+            try:
+                t = browser.latest_tab
+                print(f"当前页面标题: {getattr(t, 'title', '')}")
+                print(f"当前页面地址: {getattr(t, 'url', '')}")
+            except Exception:
+                pass
         print("-" * 64)
 
         print("\n🎉 浏览器已就绪并处于活跃监听中！")
@@ -260,7 +221,7 @@ def launch_browser(
         print(" [常驻服务模式运行中]")
         print(" 保持本控制台窗口打开，即可确保浏览器持续常驻供智能体随时连接。")
         print(" 快捷控制命令:")
-        print("   输入  r  并回车: 刷新并打印当前标签页状态与登录态")
+        print("   输入  r  并回车: 调用 website_open 刷新并同步标签页状态与登录态")
         print("   输入  q  并回车: 安全关闭浏览器并退出")
         print("   按 Ctrl+C: 退出本控制台（浏览器仍保留后台）")
         print("=" * 64 + "\n")
@@ -274,17 +235,24 @@ def launch_browser(
                         browser.quit()
                     except Exception:
                         pass
+                    set_browser(None)
                     print("[+] 浏览器已关闭，程序退出。")
                     break
                 elif cmd == "r":
                     print("\n--- 正在刷新状态 ---")
                     check_status(port)
-                    # 重新探测登录态
+                    # 重新调用 website_open 探测登录态与账号点数
                     try:
-                        t = browser.latest_tab
-                        info = check_login_status(t)
-                        status_str = f"已登录 ({info['account_email']})" if info["is_logged_in"] else "未登录"
-                        print(f"最新标签页: {info['title'][:30]} | 登录: {status_str}")
+                        print(f"[*] 正在调用 website_open 刷新页面与账号状态 (URL: {url})...")
+                        refresh_res_raw = website_open(url=url)
+                        refresh_res = json.loads(refresh_res_raw)
+                        if refresh_res.get("success"):
+                            d = refresh_res.get("data", {})
+                            login_str = f"已登录 ({d.get('account_email')})" if d.get("is_logged_in") else "未登录"
+                            credits_str = f" | 点数: {d.get('credits')} pt" if d.get("credits") is not None else ""
+                            print(f"最新标签页: {d.get('title', '')[:30]} | 状态: {login_str}{credits_str}")
+                        else:
+                            print(f"刷新失败: {refresh_res.get('error')}")
                     except Exception as e:
                         print(f"探测标签页异常: {e}")
                     print("--------------------\n")

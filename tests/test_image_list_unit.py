@@ -58,7 +58,10 @@ def test_image_list_when_browser_busy(tmp_path, monkeypatch):
         assert data["images"][0]["name"] == "已缓存图片"
 
 
-def test_image_list_no_images_button(monkeypatch):
+def test_image_list_no_images_button(tmp_path, monkeypatch):
+    test_cache_file = str(tmp_path / "test_projects_cache.json")
+    monkeypatch.setattr("google_flow_mcp.models.project_cache.CACHE_FILE", test_cache_file)
+
     from google_flow_mcp.tools.image_list import register_image_list_tool
     mock_mcp = MagicMock()
     tool_func = None

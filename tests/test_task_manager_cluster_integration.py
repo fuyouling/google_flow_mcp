@@ -4,6 +4,12 @@ from google_flow_mcp.cluster.scheduler import ClusterScheduler
 from google_flow_mcp.cluster.models import TaskType, TaskResult, TaskStatus
 
 
+@pytest.fixture(autouse=True)
+def mock_account_cache(tmp_path, monkeypatch):
+    test_file = str(tmp_path / "test_account_cache.json")
+    monkeypatch.setattr("google_flow_mcp.models.account_cache.ACCOUNT_CACHE_FILE", test_file)
+
+
 def test_task_manager_delegation_to_cluster():
     tm = TaskManager()
     scheduler = ClusterScheduler()

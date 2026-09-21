@@ -65,6 +65,16 @@ class TaskManager:
         返回 (True, current_task_info) 或 (False, None)。
         """
         with self._lock:
+            # 0. 集群模式：检查本机 local worker 是否正在忙碌执行
+            if self._cluster_scheduler is not None:
+                from google_flow_mcp.cluster.models import WorkerState
+                for wid, w in self._cluster_scheduler.workers.items():
+                    if w.state == WorkerState.BUSY and (w.ip in ("127.0.0.1", "localhost") or "local" in wid):
+                        c_id = w.current_job_id
+                        job_info = self._all_jobs.get(c_id, {"job_id": c_id, "task_type": "生成"})
+                        return True, job_info
+                return False, None
+
             # 1. 检查当前活跃任务
             if self._current_task is not None:
                 c_id = self._current_task["job_id"]
@@ -127,7 +137,11 @@ class TaskManager:
                     job_id=job_id,
                 )
                 if job_id in self._cluster_scheduler.jobs:
-                    self._cluster_scheduler.jobs[job_id].update(initial_state)
+                    # 保留 initial_state 的默认参数与详情结构，但以集群调度器真实状态 (如 assigned/queued) 为准
+                    sched_state = self._cluster_scheduler.jobs[job_id]
+                    merged = dict(initial_state)
+                    merged.update(sched_state)
+                    self._cluster_scheduler.jobs[job_id] = merged
                 self._all_jobs[job_id] = self._cluster_scheduler.jobs[job_id]
                 q_pos = len(self._cluster_scheduler.pending_tasks)
                 logger.info(f"Task {job_id} routed to ClusterScheduler (pending: {q_pos})")
@@ -365,9 +379,12 @@ class TaskManager:
 
     def get_queue_summary(self) -> dict:
         """
-        获取全局任务队列汇总状态（当前执行 + 排队列表）。
+        获取全局任务队列汇总状态（当前执行 + 排队列表 + 各账号积分信息）。
         """
         with self._lock:
+            from google_flow_mcp.models.account_cache import AccountCache
+            accounts_credits = AccountCache.list_accounts()
+
             if self._cluster_scheduler is not None:
                 workers = self._cluster_scheduler.get_workers()
                 idle_count = len([w for w in workers if w.state.value == "idle"])
@@ -387,11 +404,14 @@ class TaskManager:
                             "ip": w.ip,
                             "state": w.state.value,
                             "account": w.account,
+                            "credits": w.credits,
+                            "daily_free_remaining": w.daily_free_remaining,
                             "current_job_id": w.current_job_id,
                             "cached_asset_count": len(w.cached_assets),
                         }
                         for w in workers
                     ],
+                    "accounts_credits": accounts_credits,
                 }
 
             current_info = None
@@ -438,7 +458,8 @@ class TaskManager:
                 "current_task": current_info,
                 "queue_length": len(queued_list),
                 "queued_tasks": queued_list,
-                "history_count": len(self._history_jobs)
+                "history_count": len(self._history_jobs),
+                "accounts_credits": accounts_credits,
             }
 
     def _record_history(self, job_id: str, state: dict) -> None:
