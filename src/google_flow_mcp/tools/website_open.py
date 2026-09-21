@@ -61,15 +61,75 @@ def _fetch_and_cache_credits(
         AccountCache.update(email=save_email, credits=fresh_credits)
 
         # 尝试通过 WorkerClient 单例上报 master（仅 Worker 进程中有效）
+        # 如果当前进程没有 WorkerClient 实例（例如独立运行的 start_browser.py），则尝试使用临时 gRPC 连接上报。
         try:
             from google_flow_mcp.cluster.worker_client import get_worker_client
             worker = get_worker_client()
             if worker is not None:
                 worker.report_account_info(email=save_email, credits=fresh_credits)
+            else:
+                _report_credits_via_grpc_temp(email=save_email, credits=fresh_credits)
         except Exception as e:
-            logger.debug(f"website_open: WorkerClient 上报跳过（非 Worker 进程或异常）: {e}")
+            logger.debug(f"website_open: WorkerClient 上报跳过或异常: {e}")
 
     return credits
+
+
+def _report_credits_via_grpc_temp(email: str, credits: int) -> None:
+    """
+    如果在非 WorkerClient 进程（如独立的 start_browser 脚本）中抓到了积分，
+    尝试建立一个临时的 gRPC Stream 通知 Master。
+    """
+    try:
+        from google_flow_mcp.config import get_settings
+        settings = get_settings()
+        if not settings.is_cluster_enabled or not settings.cluster_master_url:
+            return
+
+        import asyncio
+        from grpc import aio as grpc_aio
+        from google_flow_mcp.cluster.proto import cluster_pb2, cluster_pb2_grpc
+        
+        master_host = "127.0.0.1"
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(settings.cluster_master_url)
+            if parsed.hostname:
+                master_host = parsed.hostname
+        except Exception:
+            pass
+        
+        grpc_target = f"{master_host}:{settings.cluster_grpc_port}"
+        worker_id = settings.worker_account or "standalone"
+        
+        async def _send():
+            try:
+                async with grpc_aio.insecure_channel(grpc_target) as channel:
+                    stub = cluster_pb2_grpc.ClusterServiceStub(channel)
+                    
+                    async def request_generator():
+                        yield cluster_pb2.WorkerMessage(
+                            account_info=cluster_pb2.AccountInfoUpdate(
+                                worker_id=worker_id,
+                                email=email,
+                                credits=credits
+                            )
+                        )
+                    
+                    # 开始调用，只发送一个元素即可
+                    async for _ in stub.StreamTasks(request_generator()):
+                        break
+            except Exception as e:
+                logger.debug(f"Temporary gRPC report failed: {e}")
+                
+        # 兼容当前是否有运行中的事件循环
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(_send())
+        except RuntimeError:
+            asyncio.run(_send())
+    except Exception as e:
+        logger.debug(f"Failed to initiate temp gRPC report: {e}")
 
 
 
