@@ -206,11 +206,16 @@ def execute_cluster_task(
         img_page = FlowImagePage(tab)
         image_path = params.get("image_path")
         image_name = params.get("image_name")
-        img_page.upload_image_on_project_page(project_id, image_path)
-        img_page.rename_and_save_in_detail(image_name)
+        
+        # If image_path is provided, perform the explicit upload.
+        # Otherwise (e.g. broadcast sync), asset_syncer's required_assets already uploaded it to Flow.
+        if image_path:
+            img_page.upload_image_on_project_page(project_id, image_path)
+            img_page.rename_and_save_in_detail(image_name)
+            
         return (
             {"image_name": image_name, "project_id": project_id},
-            [{"name": image_name, "type": "image", "local_path": image_path}],
+            [{"name": image_name, "type": "image", "local_path": image_path or ""}],
         )
 
     # ─────────────────────────────────────────────────────────
@@ -235,17 +240,20 @@ def execute_cluster_task(
         char_name = params.get("character_name")
         portrait = params.get("portrait_image_path")
         fullbody = params.get("fullbody_image_path", "")
-        char_page.navigate_to_characters(project_id)
-        if not char_page.click_new_character():
-            raise Exception("Failed to open character editor in Flow")
-        char_page.upload_portrait(portrait)
-        if fullbody:
-            char_page.upload_fullbody(fullbody)
-        char_page.rename_character(char_name)
-        char_page.save_character()
+        
+        # If portrait is missing, it implies a broadcast sync where AssetSyncer already injected it
+        if portrait:
+            char_page.navigate_to_characters(project_id)
+            if not char_page.click_new_character():
+                raise Exception("Failed to open character editor in Flow")
+            char_page.upload_portrait(portrait)
+            if fullbody:
+                char_page.upload_fullbody(fullbody)
+            char_page.rename_character(char_name)
+            char_page.save_character()
         return (
             {"character_name": char_name, "project_id": project_id},
-            [{"name": char_name, "type": "character", "local_path": portrait}],
+            [{"name": char_name, "type": "character", "local_path": portrait or ""}],
         )
 
     # ─────────────────────────────────────────────────────────
@@ -380,13 +388,34 @@ def execute_cluster_task(
         char_page.generate_portrait(portrait_prompt, model_name)
         if fullbody_prompt:
             char_page.generate_fullbody(fullbody_prompt, model_name)
+        
+        download = params.get("download", False)
+        portrait_local_path = ""
+        fullbody_local_path = ""
+        
+        if download:
+            p_path = char_page.download_character_image(f"{char_name}_Portrait")
+            if p_path:
+                portrait_local_path = p_path
+            if fullbody_prompt:
+                fb_path = char_page.download_character_image(f"{char_name}_Fullbody")
+                if fb_path:
+                    fullbody_local_path = fb_path
+                    
         if voice_name:
             char_page.select_voice(voice_name, voice_style)
 
         char_page.save_character()
+        
+        produced_assets = []
+        if portrait_local_path and Path(portrait_local_path).exists():
+            produced_assets.append({"name": f"{char_name}_Portrait", "type": "character", "local_path": portrait_local_path})
+        if fullbody_local_path and Path(fullbody_local_path).exists():
+            produced_assets.append({"name": f"{char_name}_Fullbody", "type": "character", "local_path": fullbody_local_path})
+            
         return (
             {"character_name": char_name, "project_id": project_id},
-            [{"name": char_name, "type": "character", "local_path": ""}],
+            produced_assets,
         )
 
     else:

@@ -129,6 +129,21 @@ def register_image_create_by_upload_tool(mcp: FastMCP) -> None:
             "image_path": image_path,
             "image_name": formatted_name,
         }
+        
+        import shutil
+        from google_flow_mcp.config import get_settings
+        settings = get_settings()
+        asset_dir = Path(settings.cluster_asset_dir)
+        asset_dir.mkdir(parents=True, exist_ok=True)
+        dest_path = asset_dir / formatted_name
+        
+        if p_path.resolve() != dest_path.resolve():
+            try:
+                shutil.copy2(p_path, dest_path)
+                logger.info(f"Copied {p_path} to cluster asset dir: {dest_path}")
+            except Exception as e:
+                logger.error(f"Failed to copy image to asset dir: {e}")
+
         submit_result = task_manager.submit_task(
             task_type="image_upload",
             job_id=job_id,
@@ -137,5 +152,6 @@ def register_image_create_by_upload_tool(mcp: FastMCP) -> None:
             project_name=project_name,
             task_name=f"upload_{formatted_name}",
             params=task_params,
+            required_assets=[formatted_name]
         )
         return json.dumps(submit_result, ensure_ascii=False)

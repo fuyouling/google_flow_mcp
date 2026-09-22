@@ -96,6 +96,9 @@ def register_image_create_tool(mcp: FastMCP) -> None:
            - 若 `is_finished == True`：表示任务彻底结束（成功完成或发生异常），智能体方可停止轮询，并向用户展示生成的图片结果或错误说明。
         4. 全局查看与取消：可随时调用 `task_queue_status` 工具查看全局排队概览；使用 `task_cancel(job_id)` 可取消排队或中断任务。
         """
+        if not download:
+            download = "1K"
+            
         if download and download not in ("1K", "2K"):
             return json.dumps({
                 "success": False,

@@ -435,6 +435,55 @@ class ClusterScheduler:
                 for a in task.required_assets:
                     worker.cached_assets.add(a)
 
+            # --- Broadcast new image/character to all other projects ---
+            if task and task.task_type in (
+                TaskType.IMAGE_CREATE, TaskType.IMAGE_CREATE_BY_UPLOAD,
+                TaskType.CHARACTER_CREATE, TaskType.CHARACTER_CREATE_BY_UPLOAD
+            ):
+                is_image = task.task_type in (TaskType.IMAGE_CREATE, TaskType.IMAGE_CREATE_BY_UPLOAD)
+                asset_name = None
+                if task.task_type in (TaskType.IMAGE_CREATE, TaskType.CHARACTER_CREATE):
+                    expected_type = "image" if is_image else "character"
+                    for p in result.produced_assets:
+                        if p.get("type") == expected_type and "name" in p:
+                            # For character, the name might be "Name_Portrait", we just need the base name. 
+                            # But wait, character_create returns the base name in task params!
+                            asset_name = task.params.get("character_name") if not is_image else p["name"]
+                            break
+                else:
+                    asset_name = task.params.get("image_name") if is_image else task.params.get("character_name")
+                
+                if asset_name:
+                    try:
+                        from google_flow_mcp.models.project_cache import ProjectCache
+                        all_projects = ProjectCache.get_all_projects()
+                        current_project = task.project_alias
+                        for p in all_projects:
+                            p_name = p.get("name")
+                            if p_name and p_name != current_project:
+                                # Submit broadcast upload task
+                                broadcast_job_id = f"bcast_{uuid.uuid4().hex[:8]}"
+                                
+                                if is_image:
+                                    self.submit_task(
+                                        task_type=TaskType.IMAGE_CREATE_BY_UPLOAD,
+                                        project_alias=p_name,
+                                        params={"image_name": asset_name},
+                                        required_assets=[asset_name],
+                                        job_id=broadcast_job_id
+                                    )
+                                else:
+                                    self.submit_task(
+                                        task_type=TaskType.CHARACTER_CREATE_BY_UPLOAD,
+                                        project_alias=p_name,
+                                        params={"character_name": asset_name},
+                                        required_assets=[f"{asset_name}_Portrait", f"{asset_name}_Fullbody"],
+                                        job_id=broadcast_job_id
+                                    )
+                                logger.info(f"Broadcasted {'image' if is_image else 'character'} '{asset_name}' sync to project {p_name}")
+                    except Exception as e:
+                        logger.error(f"Failed to broadcast {'image' if is_image else 'character'} {asset_name}: {e}")
+
             # Update legacy job status dictionary
             job_dict = {
                 "job_id": job_id,

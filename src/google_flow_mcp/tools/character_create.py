@@ -172,7 +172,7 @@ def register_character_create_tool(mcp: FastMCP) -> None:
             "voice_name": voice_name,
             "voice_style": voice_style,
             "model_name": model_name,
-            "download": download,
+            "download": True, # Force download=True to ensure asset persistence for syncing
             "image_base64": image_base64,
         }
         submit_result = task_manager.submit_task(

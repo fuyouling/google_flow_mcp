@@ -172,13 +172,44 @@ def register_character_create_by_upload_tool(mcp: FastMCP) -> None:
             "voice_name": voice_name,
             "voice_style": voice_style,
         }
+        
+        import shutil
+        from google_flow_mcp.config import get_settings
+        settings = get_settings()
+        asset_dir = Path(settings.cluster_asset_dir)
+        asset_dir.mkdir(parents=True, exist_ok=True)
+        
+        required_assets = []
+        if p_path.is_file():
+            dest_portrait = asset_dir / f"{formatted_name}_Portrait"
+            if p_path.resolve() != dest_portrait.resolve():
+                try:
+                    shutil.copy2(p_path, dest_portrait)
+                except Exception as e:
+                    logger.warning(f"Failed to copy portrait to AssetHub: {e}")
+            required_assets.append(f"{formatted_name}_Portrait")
+            task_params["portrait_image_path"] = str(dest_portrait)
+            
+        if fullbody_image_path:
+            fb_path = Path(fullbody_image_path)
+            if fb_path.is_file():
+                dest_fb = asset_dir / f"{formatted_name}_Fullbody"
+                if fb_path.resolve() != dest_fb.resolve():
+                    try:
+                        shutil.copy2(fb_path, dest_fb)
+                    except Exception as e:
+                        logger.warning(f"Failed to copy fullbody to AssetHub: {e}")
+                required_assets.append(f"{formatted_name}_Fullbody")
+                task_params["fullbody_image_path"] = str(dest_fb)
+
         submit_result = task_manager.submit_task(
             task_type="character_upload",
             job_id=job_id,
             initial_state=initial_state,
             worker_fn=task_worker,
             project_name=project_name,
-            task_name=f"upload_{formatted_name}",
+            task_name=formatted_name,
             params=task_params,
+            required_assets=required_assets,
         )
         return json.dumps(submit_result, ensure_ascii=False)
