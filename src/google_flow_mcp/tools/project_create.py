@@ -46,7 +46,7 @@ def register_project_create_tool(mcp: FastMCP) -> None:
             if title:
                 logger.info(f"Navigating back to home to rename new project to '{title}'")
                 page.open()
-                success = page.rename_project("Untitled project", title)
+                success = page.rename_project(new_title=title, old_title="Untitled project")
                 if not success:
                     return json.dumps({
                         "warning": "Project created but rename failed.",

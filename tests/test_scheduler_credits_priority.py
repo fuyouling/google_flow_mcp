@@ -2,20 +2,24 @@ import os
 import pytest
 from google_flow_mcp.cluster.scheduler import ClusterScheduler
 from google_flow_mcp.cluster.models import TaskType, WorkerState
-from google_flow_mcp.models import account_cache
 from google_flow_mcp.models.account_cache import AccountCache
 
 
+from google_flow_mcp.models.db import init_db
+
 @pytest.fixture(autouse=True)
-def temp_account_cache(tmp_path, monkeypatch):
-    test_file = str(tmp_path / "test_account_cache_sched.json")
-    monkeypatch.setattr(account_cache, "ACCOUNT_CACHE_FILE", test_file)
-    yield test_file
-    if os.path.exists(test_file):
+def clean_cache_db(tmp_path, monkeypatch):
+    db_path = tmp_path / "flow_cache.db"
+    monkeypatch.setenv("FLOW_CACHE_DB", str(db_path))
+    monkeypatch.setattr("google_flow_mcp.models.db.DB_FILE", str(db_path))
+    init_db()
+    yield db_path
+    if db_path.exists():
         try:
-            os.remove(test_file)
-        except Exception:
+            db_path.unlink()
+        except:
             pass
+
 
 
 def test_scheduler_tier1_over_tier2_and_tier3():

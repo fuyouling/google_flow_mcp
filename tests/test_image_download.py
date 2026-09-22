@@ -16,11 +16,11 @@ def test_image_download():
     tab = browser.latest_tab
     edit_page = ImageEditPage(tab)
     
-    project_id = "41ffbc19-48f6-44c0-8b2a-4745e26ddc74"
+    project_name = "41ffbc19-48f6-44c0-8b2a-4745e26ddc74"
     media_id = "e45e4ec3-34b5-4b63-aa62-d6510415e8f8"
     
-    logger.info(f"打开项目 {project_id} 下的资源 {media_id} ...")
-    edit_page.open(project_id, media_id)
+    logger.info(f"打开项目 {project_name} 下的资源 {media_id} ...")
+    edit_page.open(project_name, media_id)
     
     # 打印一些页面信息以确认
     logger.info(f"当前 URL: {edit_page.current_url}")

@@ -117,37 +117,41 @@ def cmd_master(args: argparse.Namespace) -> None:
     if not args.no_browser:
         ensure_browser_running(port=None, force=args.force_browser)
 
-    if args.hub_only:
-        # 仅启动集群 Hub 服务，不作为 stdio MCP 运行
-        from google_flow_mcp.cluster.asset_hub import AssetHub
-        from google_flow_mcp.cluster.master_server import MasterServer
-        from google_flow_mcp.cluster.scheduler import ClusterScheduler
-        from google_flow_mcp.cluster.worker_client import WorkerClient
+    from google_flow_mcp.cluster.asset_hub import AssetHub
+    from google_flow_mcp.cluster.master_server import MasterServer
+    from google_flow_mcp.cluster.scheduler import ClusterScheduler
+    from google_flow_mcp.cluster.worker_client import WorkerClient
+    from pathlib import Path
+    import threading
+    import atexit
 
-        print("\n[*] 启动独立集群调度中枢 (Hub Only 模式)...")
-        asset_hub = AssetHub(Path(settings.cluster_asset_dir))
-        cluster_scheduler = ClusterScheduler()
-        master_server = MasterServer(
-            scheduler=cluster_scheduler,
-            asset_hub=asset_hub,
-            host=settings.cluster_master_host,
-            http_port=settings.cluster_master_port,
-            grpc_port=settings.cluster_grpc_port,
+    print("\n[*] 启动集群调度中枢...")
+    asset_hub = AssetHub(Path(settings.cluster_asset_dir))
+    cluster_scheduler = ClusterScheduler()
+    master_server = MasterServer(
+        scheduler=cluster_scheduler,
+        asset_hub=asset_hub,
+        host=settings.cluster_master_host,
+        http_port=settings.cluster_master_port,
+        grpc_port=settings.cluster_grpc_port,
+    )
+    master_server.start()
+    atexit.register(master_server.stop)
+
+    if not args.no_local_worker:
+        print("[*] 启动本机 Worker 0 参与任务计算...")
+        local_worker = WorkerClient(
+            master_url=f"http://127.0.0.1:{settings.cluster_master_port}",
+            worker_id=settings.worker_id,
+            account=settings.worker_account,
         )
-        master_server.start()
+        threading.Thread(target=local_worker.run_forever, daemon=True, name="MasterLocalWorker").start()
+        atexit.register(local_worker.stop)
 
-        if not args.no_local_worker:
-            print("[*] 启动本机 Worker 0 参与任务计算...")
-            local_worker = WorkerClient(
-                master_url=f"http://127.0.0.1:{settings.cluster_master_port}",
-                worker_id=settings.worker_id,
-                account=settings.worker_account,
-            )
-            import threading
-            threading.Thread(target=local_worker.run_forever, daemon=True, name="MasterLocalWorker").start()
-
-        print("[✔] Master 服务已就绪，按 Ctrl+C 停止服务。")
+    if args.hub_only:
+        print("[✔] Master Hub 服务已就绪，按 Ctrl+C 停止服务。")
         try:
+            import time
             while True:
                 time.sleep(1)
         except KeyboardInterrupt:
@@ -155,10 +159,10 @@ def cmd_master(args: argparse.Namespace) -> None:
             master_server.stop()
             print("[+] Master 服务已关闭。")
     else:
-        # 默认模式：运行完整 MCP 服务 (内置 MasterServer + 本机 Worker)
+        # 默认模式：运行完整 MCP 服务 (集成集群调度中枢与本机 Worker)
         from google_flow_mcp.server import main as server_main
         print("\n[*] 正在启动 FastMCP 服务 (集成集群调度中枢与本机 Worker)...")
-        server_main()
+        server_main(cluster_scheduler=cluster_scheduler)
 
 
 def cmd_worker(args: argparse.Namespace) -> None:

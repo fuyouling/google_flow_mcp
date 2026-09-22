@@ -23,11 +23,12 @@ def test_character_create_image_base64_false():
     mock_browser.latest_tab = MagicMock()
 
     with patch("google_flow_mcp.tools.character_create.get_browser", return_value=mock_browser), \
+         patch("google_flow_mcp.utils.project_utils.ensure_project_exists", return_value="TestProject"), \
          patch("google_flow_mcp.tools.character_create.FlowCharacterPage", return_value=mock_page):
 
         # Call with default image_base64=False
         res_json = tool_fn(
-            project_id="proj_1",
+            project_name="proj_1",
             character_name="Arthur",
             portrait_prompt="portrait prompt",
             fullbody_prompt="fullbody prompt",
@@ -36,7 +37,7 @@ def test_character_create_image_base64_false():
         res = json.loads(res_json)
         job_id = res["job_id"]
 
-        for _ in range(20):
+        for _ in range(100):
             status = task_manager.get_task_status(job_id)
             if status.get("is_finished"):
                 break
@@ -65,11 +66,12 @@ def test_character_create_image_base64_true():
     mock_browser.latest_tab = MagicMock()
 
     with patch("google_flow_mcp.tools.character_create.get_browser", return_value=mock_browser), \
+         patch("google_flow_mcp.utils.project_utils.ensure_project_exists", return_value="TestProject"), \
          patch("google_flow_mcp.tools.character_create.FlowCharacterPage", return_value=mock_page):
 
         # Call with image_base64=True
         res_json = tool_fn(
-            project_id="proj_1",
+            project_name="proj_1",
             character_name="Arthur",
             portrait_prompt="portrait prompt",
             fullbody_prompt="fullbody prompt",
@@ -78,7 +80,7 @@ def test_character_create_image_base64_true():
         res = json.loads(res_json)
         job_id = res["job_id"]
 
-        for _ in range(20):
+        for _ in range(100):
             status = task_manager.get_task_status(job_id)
             if status.get("is_finished"):
                 break

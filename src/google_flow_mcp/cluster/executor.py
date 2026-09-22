@@ -90,17 +90,16 @@ def execute_cluster_task(
         # Click generate
         gen_btn = None
         for _ in range(10):
-            btns = tab.eles("tag:button")
-            candidates = [b for b in btns if "generate-icon-button" in (b.attr("class") or "")]
-            if candidates and not candidates[0].attr("disabled"):
-                gen_btn = candidates[0]
+            submit_btn = tab.ele('xpath://button[@type="submit"]')
+            if submit_btn and not submit_btn.attr("disabled"):
+                gen_btn = submit_btn
                 break
             time.sleep(0.5)
 
         if not gen_btn:
             raise Exception("Generate button not found")
 
-        gen_btn.click(by_js=True)
+        gen_btn.click()
         update_progress("generating", "已点击生成，等待开始生成...")
 
         # Wait for loading indicator
@@ -154,7 +153,7 @@ def execute_cluster_task(
             raise Exception(f"视频生成超时（超过 {total_timeout} 秒未完成）")
 
         # Extract URL
-        time.sleep(2)
+        time.sleep(0.5)
         video_url = ""
         video_tag = tab.ele("xpath:(//video)[1]", timeout=5)
         if video_tag:
@@ -168,7 +167,7 @@ def execute_cluster_task(
             except Exception:
                 tile.click(by_js=True)
 
-        time.sleep(3)
+        time.sleep(0.5)
         edit_page = VideoEditPage(tab)
         rename_name = video_name if video_name else f"video_{job_id[:8]}"
         rename_success = edit_page.rename(rename_name)
@@ -287,17 +286,16 @@ def execute_cluster_task(
 
         gen_btn = None
         for _ in range(10):
-            btns = tab.eles("tag:button")
-            candidates = [b for b in btns if "generate-icon-button" in (b.attr("class") or "")]
-            if candidates and not candidates[0].attr("disabled"):
-                gen_btn = candidates[0]
+            submit_btn = tab.ele('xpath://button[@type="submit"]')
+            if submit_btn and not submit_btn.attr("disabled"):
+                gen_btn = submit_btn
                 break
             time.sleep(0.5)
 
         if not gen_btn:
             raise Exception("Generate button not found")
 
-        gen_btn.click(by_js=True)
+        gen_btn.click()
         update_progress("generating", "已点击生成，等待开始生成...")
 
         loading_xpath = 'xpath://div[@class="loading-percentage"]'
@@ -324,7 +322,7 @@ def execute_cluster_task(
         else:
             raise Exception(f"图片生成超时（超过 {total_timeout} 秒未完成）")
 
-        time.sleep(2)
+        time.sleep(0.5)
         img_url = ""
         img_tag = tab.ele("xpath:(//flow-grid-tile-container//img)[1]", timeout=5)
         if img_tag:
@@ -339,7 +337,7 @@ def execute_cluster_task(
             except Exception:
                 tile.click(by_js=True)
 
-            time.sleep(2)
+            time.sleep(0.5)
             edit_page = ImageEditPage(tab)
             edit_page.rename(rename_name)
             if download in ("1K", "2K"):

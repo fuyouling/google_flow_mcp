@@ -84,7 +84,14 @@ def test_single_concurrency_and_fifo_queue():
     assert st_c["queue_position"] == 2
 
     # 等待全部执行完毕
-    time.sleep(0.8)
+    c_finished = threading.Event()
+    def check_c():
+        while task_manager.get_task_status("job_c")["status"] != "completed":
+            time.sleep(0.1)
+        c_finished.set()
+    
+    threading.Thread(target=check_c, daemon=True).start()
+    c_finished.wait(timeout=5.0)
 
     # 验证严格顺序执行：A 开始并结束 -> B 开始并结束 -> C 开始并结束
     assert execution_order == [
@@ -282,12 +289,12 @@ def test_browser_busy_blocks_project_tools():
         assert "active_gen_job" in res_create["error"]
 
         # 2. project_open 应当被拦截
-        res_open = json.loads(open_fn(project_id="test_uuid"))
+        res_open = json.loads(open_fn(project_name="test_uuid"))
         assert res_open["success"] is False
         assert "active_gen_job" in res_open["error"]
 
         # 3. project_rename 应当被拦截
-        res_rename = json.loads(rename_fn(project_id="test_uuid", new_name="New Name"))
+        res_rename = json.loads(rename_fn(project_name="test_uuid", new_name="New Name"))
         assert res_rename["success"] is False
         assert "active_gen_job" in res_rename["error"]
 

@@ -4,11 +4,27 @@ from unittest.mock import MagicMock, patch
 from google_flow_mcp.models.project_cache import ProjectCache
 
 
+from google_flow_mcp.models.db import init_db
+
+@pytest.fixture(autouse=True)
+def clean_cache_db(tmp_path, monkeypatch):
+    db_path = tmp_path / "flow_cache.db"
+    monkeypatch.setenv("FLOW_CACHE_DB", str(db_path))
+    monkeypatch.setattr("google_flow_mcp.models.db.DB_FILE", str(db_path))
+    init_db()
+    yield db_path
+    if db_path.exists():
+        try:
+            db_path.unlink()
+        except:
+            pass
+
+
+
 def test_project_cache_images(tmp_path, monkeypatch):
     test_cache_file = str(tmp_path / "test_projects_cache.json")
-    monkeypatch.setattr("google_flow_mcp.models.project_cache.CACHE_FILE", test_cache_file)
 
-    ProjectCache.update_project("proj-img-1", "Image Project", "https://flow.google.com/project/proj-img-1")
+    ProjectCache.update_project("proj-img-1", "https://flow.google.com/project/proj-img-1")
     
     images = [
         {"index": 1, "name": "风景照 01", "thumbnail_url": "https://example.com/img1.png"},
@@ -19,17 +35,16 @@ def test_project_cache_images(tmp_path, monkeypatch):
     cached_images = ProjectCache.get_project_images("proj-img-1")
     assert cached_images == images
 
-    proj = ProjectCache.get_project_by_id("proj-img-1")
-    assert proj["name"] == "Image Project"
+    proj = ProjectCache.get_project_by_name("proj-img-1")
+    assert proj["name"] == "proj-img-1"
     assert proj["images"] == images
 
 
 def test_image_list_when_browser_busy(tmp_path, monkeypatch):
     test_cache_file = str(tmp_path / "test_projects_cache.json")
-    monkeypatch.setattr("google_flow_mcp.models.project_cache.CACHE_FILE", test_cache_file)
 
     images = [{"index": 1, "name": "已缓存图片", "thumbnail_url": "https://example.com/cached.png"}]
-    ProjectCache.update_project("proj-busy-img", "Busy Img Project", "https://flow.google.com/project/proj-busy-img")
+    ProjectCache.update_project("Busy Img Project", "https://flow.google.com/project/proj-busy-img")
     ProjectCache.update_project_images("proj-busy-img", images)
 
     from google_flow_mcp.tools.image_list import register_image_list_tool
@@ -49,7 +64,7 @@ def test_image_list_when_browser_busy(tmp_path, monkeypatch):
 
     with patch("google_flow_mcp.tools.image_list.task_manager.is_browser_busy") as mock_busy:
         mock_busy.return_value = (True, {"job_id": "job-img-999", "task_type": "视频生成"})
-        res_raw = tool_func(project_id="proj-busy-img")
+        res_raw = tool_func(project_name="proj-busy-img")
         data = json.loads(res_raw)
         assert data["success"] is True
         assert data["is_cached"] is True
@@ -60,7 +75,6 @@ def test_image_list_when_browser_busy(tmp_path, monkeypatch):
 
 def test_image_list_no_images_button(tmp_path, monkeypatch):
     test_cache_file = str(tmp_path / "test_projects_cache.json")
-    monkeypatch.setattr("google_flow_mcp.models.project_cache.CACHE_FILE", test_cache_file)
 
     from google_flow_mcp.tools.image_list import register_image_list_tool
     mock_mcp = MagicMock()
@@ -85,7 +99,7 @@ def test_image_list_no_images_button(tmp_path, monkeypatch):
         mock_tab.eles.return_value = []
         mock_browser.return_value.latest_tab = mock_tab
 
-        res_raw = tool_func(project_id="proj-empty")
+        res_raw = tool_func(project_name="proj-empty")
         data = json.loads(res_raw)
 
         assert data["success"] is True
@@ -141,7 +155,7 @@ def test_image_list_success_with_tiles(monkeypatch):
         mock_tab.eles.return_value = [tile1]
         mock_browser.return_value.latest_tab = mock_tab
 
-        res_raw = tool_func(project_id="proj-tiles")
+        res_raw = tool_func(project_name="proj-tiles")
         data = json.loads(res_raw)
 
         assert data["success"] is True

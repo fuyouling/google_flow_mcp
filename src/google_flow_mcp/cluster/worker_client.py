@@ -82,13 +82,18 @@ class WorkerClient:
 
     def _load_local_project_cache(self) -> None:
         """Load known projects from local projects_cache.json if available."""
+        import re
         try:
-            cache = ProjectCache.load()
-            for pid, pdata in cache.get("projects", {}).items():
-                title = pdata.get("name")
-                if title:
-                    self.project_mappings[title] = pid
-                self.project_mappings[pid] = pid
+            projects = ProjectCache.get_all_projects()
+            for pdata in projects:
+                url = pdata.get("url", "")
+                match = re.search(r'/project/([a-zA-Z0-9\-]+)', url)
+                if match:
+                    local_uuid = match.group(1)
+                    title = pdata.get("name")
+                    if title:
+                        self.project_mappings[title] = local_uuid
+                    self.project_mappings[local_uuid] = local_uuid
             logger.info(f"Loaded {len(self.project_mappings)} local project mappings.")
         except Exception as e:
             logger.warning(f"Failed to load local project cache: {e}")
@@ -100,32 +105,54 @@ class WorkerClient:
         Otherwise, create the project on demand if not present.
         """
         clean_alias = (project_alias or "").strip()
-        local_projects = ProjectCache.load().get("projects", {})
+        local_projects = ProjectCache.get_all_projects()
+        local_project_names = {p["name"]: p for p in local_projects}
 
         # 0. If alias is empty, default to the most recently accessed local project
         if not clean_alias:
             if local_projects:
-                latest_pid = max(
-                    local_projects.keys(),
-                    key=lambda k: local_projects[k].get("last_accessed", "")
+                latest_proj = max(
+                    local_projects,
+                    key=lambda p: p.get("last_accessed", "")
                 )
-                logger.info(f"No project_alias specified. Defaulting to most recently accessed project: {latest_pid}")
-                return latest_pid
-            clean_alias = "default"
+                latest_proj_name = latest_proj["name"]
+                logger.info(f"No project_alias specified. Defaulting to most recently accessed project: {latest_proj_name}")
+                clean_alias = latest_proj_name
+            else:
+                clean_alias = "default"
 
         # 1. Check existing mapping (name or UUID)
         if clean_alias in self.project_mappings:
             return self.project_mappings[clean_alias]
 
         # 2. Check if alias is already a local UUID
-        if clean_alias in local_projects:
-            self.project_mappings[clean_alias] = clean_alias
-            return clean_alias
+        if clean_alias in local_project_names:
+            url = local_project_names[clean_alias].get("url", "")
+            import re
+            match = re.search(r'/project/([a-zA-Z0-9\-]+)', url)
+            if match:
+                local_uuid = match.group(1)
+                self.project_mappings[clean_alias] = local_uuid
+                return local_uuid
 
-        # 3. Create new project in this worker's Flow account
-        logger.info(f"Project '{clean_alias}' not found in local account. Creating on demand...")
+        # 3. Try to fetch from cloud before creating
+        logger.info(f"Project '{clean_alias}' not found in local cache. Fetching cloud projects...")
         home = FlowHomePage(tab)
         home.open()
+        cloud_projects = home.get_projects()
+        
+        for proj_title, pdata in cloud_projects.items():
+            ProjectCache.update_project(proj_title, pdata.get("url"))
+            cloud_uuid = pdata.get("local_uuid")
+            if cloud_uuid:
+                self.project_mappings[proj_title] = cloud_uuid
+                self.project_mappings[cloud_uuid] = cloud_uuid
+        
+        if clean_alias in self.project_mappings:
+            return self.project_mappings[clean_alias]
+
+        # 4. Create new project in this worker's Flow account
+        logger.info(f"Project '{clean_alias}' not found in cloud either. Creating on demand...")
         new_uuid = home.create_project()
         time.sleep(2)
 
@@ -133,7 +160,7 @@ class WorkerClient:
         if clean_alias and clean_alias != "default":
             try:
                 home.open()
-                home.rename_project(new_uuid, "Untitled project", clean_alias)
+                home.rename_project(new_title=clean_alias, old_title="Untitled project", project_uuid=new_uuid)
             except Exception as e:
                 logger.warning(f"Could not rename project on home page: {e}")
 

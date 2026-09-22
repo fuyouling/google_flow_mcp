@@ -4,44 +4,32 @@ import re
 from unittest.mock import MagicMock, patch
 import pytest
 
-from google_flow_mcp.models.account_cache import AccountCache, ACCOUNT_CACHE_FILE
+from google_flow_mcp.models.account_cache import AccountCache
 from google_flow_mcp.pages.flow_home_page import FlowHomePage
 from google_flow_mcp.tools.website_open import _fetch_and_cache_credits
 
 
+from google_flow_mcp.models.db import init_db
+
+@pytest.fixture(autouse=True)
+def clean_cache_db(tmp_path, monkeypatch):
+    db_path = tmp_path / "flow_cache.db"
+    monkeypatch.setenv("FLOW_CACHE_DB", str(db_path))
+    monkeypatch.setattr("google_flow_mcp.models.db.DB_FILE", str(db_path))
+    init_db()
+    yield db_path
+    if db_path.exists():
+        try:
+            db_path.unlink()
+        except:
+            pass
+
+
+
 # ── AccountCache Tests ──────────────────────────────────────────
 
-@pytest.fixture
-def clean_account_cache(tmp_path, monkeypatch):
-    cache_path = tmp_path / "account_cache.json"
-    monkeypatch.setattr("google_flow_mcp.models.account_cache.ACCOUNT_CACHE_FILE", str(cache_path))
-    yield cache_path
-    if cache_path.exists():
-        cache_path.unlink()
 
-
-def test_account_cache_load_non_existent(clean_account_cache):
-    data = AccountCache.load()
-    assert data == {"accounts": {}}
-
-
-def test_account_cache_save_and_load(clean_account_cache):
-    test_data = {
-        "accounts": {
-            "test@example.com": {
-                "email": "test@example.com",
-                "credits": 500,
-                "worker_id": "worker_1",
-                "updated_at": "2026-09-21T10:00:00+00:00",
-            }
-        }
-    }
-    AccountCache.save(test_data)
-    loaded = AccountCache.load()
-    assert loaded == test_data
-
-
-def test_account_cache_update_preserves_existing_fields(clean_account_cache):
+def test_account_cache_update_preserves_existing_fields(clean_cache_db):
     # 1. 首次创建：包含 worker_id 和 credits
     AccountCache.update(email="user@example.com", credits=100, worker_id="worker_42")
     entry = AccountCache.get("user@example.com")
@@ -62,7 +50,7 @@ def test_account_cache_update_preserves_existing_fields(clean_account_cache):
     assert entry3["worker_id"] == "worker_new"
 
 
-def test_account_cache_get_latest_credits(clean_account_cache):
+def test_account_cache_get_latest_credits(clean_cache_db):
     assert AccountCache.get_latest_credits() is None
 
     AccountCache.update(email="user1@example.com", credits=50)
@@ -137,7 +125,7 @@ def test_flow_home_page_get_credits_button_not_found_no_close_attempt():
 
 # ── website_open._fetch_and_cache_credits Tests ─────────────────
 
-def test_fetch_and_cache_credits_homepage_success(clean_account_cache):
+def test_fetch_and_cache_credits_homepage_success(clean_cache_db):
     mock_tab = MagicMock()
     with patch("google_flow_mcp.pages.flow_home_page.FlowHomePage.get_credits", return_value=888):
         credits = _fetch_and_cache_credits(
@@ -152,7 +140,7 @@ def test_fetch_and_cache_credits_homepage_success(clean_account_cache):
     assert cached["credits"] == 888
 
 
-def test_fetch_and_cache_credits_non_homepage_matches_account(clean_account_cache):
+def test_fetch_and_cache_credits_non_homepage_matches_account(clean_cache_db):
     # 预设两个账号缓存
     AccountCache.update("alice@example.com", credits=300)
     AccountCache.update("bob@example.com", credits=999)
@@ -168,7 +156,7 @@ def test_fetch_and_cache_credits_non_homepage_matches_account(clean_account_cach
     assert credits == 300
 
 
-def test_fetch_and_cache_credits_fallback_when_email_missing(clean_account_cache):
+def test_fetch_and_cache_credits_fallback_when_email_missing(clean_cache_db):
     mock_tab = MagicMock()
     with patch("google_flow_mcp.pages.flow_home_page.FlowHomePage.get_credits", return_value=666):
         credits = _fetch_and_cache_credits(
@@ -196,6 +184,7 @@ def test_website_open_top_level_callable():
     mock_browser.latest_tab = mock_tab
 
     with patch("google_flow_mcp.tools.website_open.get_browser", return_value=mock_browser), \
+         patch("google_flow_mcp.utils.project_utils.ensure_project_exists", return_value="TestProject"), \
          patch("google_flow_mcp.pages.base_page.BasePage.navigate"), \
          patch("google_flow_mcp.tools.website_open._fetch_and_cache_credits", return_value=123):
         res_raw = website_open(url="https://flow.google.com")

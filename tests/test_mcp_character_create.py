@@ -22,7 +22,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() in ("gbk", "gb2312", "cp9
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 # ── 测试参数 ─────────────────────────────────────────────
-PROJECT_ID       = "41ffbc19-48f6-44c0-8b2a-4745e26ddc74"  # qqqq
+PROJECT_NAME   = "TestProject"  # qqqq
 CHARACTER_NAME   = "Test_Hero"
 PORTRAIT_PROMPT  = "Medium studio shot of a brave knight in polished steel armor with blue accents. perfectly centered, forward-facing. Captured with a Hasselblad H6D-100c and a 50mm lens. The skin is rendered with biological realism, featuring natural textures. Clamshell lighting with a bottom silver reflector creates a luminous glow. The composition is a head and shoulders shot with clear headroom, ensuring the character's full head is entirely within the frame and not cropped by the top border against a seamless, solid white background."
 FULLBODY_PROMPT  = "Full-body character design sheet, featuring a triptych of three different angles: front view, three-quarter view, and back view. High resolution, flat studio lighting, consistent body proportions across all views, solid white background. brave knight in polished steel armor with blue accents"
@@ -65,7 +65,7 @@ async def main():
     print("=" * 60)
     print("  MCP character_create 下载功能集成测试")
     print("=" * 60)
-    print(f"  project_id      : {PROJECT_ID}")
+    print(f"  project_name      : {PROJECT_NAME}")
     print(f"  character_name  : {CHARACTER_NAME}")
     print(f"  portrait_prompt : {PORTRAIT_PROMPT[:45]}...")
     print(f"  fullbody_prompt : {FULLBODY_PROMPT[:45]}...")
@@ -91,7 +91,7 @@ async def main():
             create_result = await session.call_tool(
                 "character_create",
                 arguments={
-                    "project_id":      PROJECT_ID,
+                    "project_name":      PROJECT_NAME,
                     "character_name":  CHARACTER_NAME,
                     "portrait_prompt": PORTRAIT_PROMPT,
                     "fullbody_prompt": FULLBODY_PROMPT,

@@ -77,72 +77,28 @@ atexit.register(task_manager.stop)
 # 注意：不在 atexit 中自动关闭浏览器，以保留常驻浏览器供后续智能体对话/工具调用直接连接复用
 
 
-def main() -> None:
-    """Run the MCP server in stdio transport mode with cluster support."""
-    from pathlib import Path
+def main(cluster_scheduler=None) -> None:
+    """Run the MCP server in stdio transport mode."""
     import threading
     from google_flow_mcp.config import get_settings
 
     settings = get_settings()
 
-    if settings.is_cluster_enabled:
-        from google_flow_mcp.cluster.asset_hub import AssetHub
-        from google_flow_mcp.cluster.scheduler import ClusterScheduler
-        from google_flow_mcp.cluster.master_server import MasterServer
-        from google_flow_mcp.cluster.worker_client import WorkerClient
-        from google_flow_mcp.cluster.launcher import get_lan_ips
-
-        lan_ips = get_lan_ips()
-        primary_ip = lan_ips[0] if lan_ips else "127.0.0.1"
-
-        logger.info(
-            f"Initializing Cluster Master: gRPC :{settings.cluster_grpc_port}, HTTP :{settings.cluster_master_port}..."
-        )
-        logger.info(
-            f"Cluster Master active (LAN IP: {primary_ip})"
-        )
-        logger.info(f"Workers connect gRPC: {primary_ip}:{settings.cluster_grpc_port}, HTTP: http://{primary_ip}:{settings.cluster_master_port}")
-
-        asset_hub = AssetHub(Path(settings.cluster_asset_dir))
-        cluster_scheduler = ClusterScheduler()
-        master_server = MasterServer(
-            scheduler=cluster_scheduler,
-            asset_hub=asset_hub,
-            host=settings.cluster_master_host,
-            grpc_port=settings.cluster_grpc_port,
-            http_port=settings.cluster_master_port,
-        )
-        master_server.start()
-
-        # Connect task_manager to cluster_scheduler
+    if cluster_scheduler:
         task_manager.set_cluster_scheduler(cluster_scheduler)
 
-        # Start Local Worker 0
-        local_worker = WorkerClient(
-            master_url=f"http://127.0.0.1:{settings.cluster_master_port}",
-            worker_id=settings.worker_id,
-            account=settings.worker_account,
-            grpc_target=f"127.0.0.1:{settings.cluster_grpc_port}",
-        )
+    if settings.auto_launch_browser:
+        def _prewarm_browser() -> None:
+            try:
+                logger.info("Auto-launching browser via website_open in background...")
+                from google_flow_mcp.tools.website_open import website_open
+                website_open()
+            except Exception as e:
+                logger.warning(f"Failed to auto-launch browser on startup: {e}")
+
         threading.Thread(
-            target=local_worker.run_forever, daemon=True, name="MasterLocalWorker"
+            target=_prewarm_browser, daemon=True, name="BrowserPrewarm"
         ).start()
-
-        if settings.auto_launch_browser:
-            def _prewarm_browser() -> None:
-                try:
-                    logger.info("Auto-launching browser via website_open in background...")
-                    from google_flow_mcp.tools.website_open import website_open
-                    website_open()
-                except Exception as e:
-                    logger.warning(f"Failed to auto-launch browser on startup: {e}")
-
-            threading.Thread(
-                target=_prewarm_browser, daemon=True, name="BrowserPrewarm"
-            ).start()
-
-        atexit.register(master_server.stop)
-        atexit.register(local_worker.stop)
 
     logger.info("Starting google-flow-mcp server (stdio mode)...")
     mcp.run(transport="stdio")

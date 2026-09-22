@@ -196,12 +196,12 @@ class ClusterScheduler:
             for t in list(self.pending_tasks):
                 if t.job_id == job_id:
                     self.pending_tasks.remove(t)
-                    self.jobs[job_id] = {
+                    self.jobs[job_id].update({
                         "job_id": job_id,
                         "status": "cancelled",
                         "is_finished": True,
                         "message": "Task was cancelled before execution.",
-                    }
+                    })
                     logger.info(f"Task {job_id} cancelled from queue.")
                     return True
 
@@ -448,7 +448,10 @@ class ClusterScheduler:
                 "next_action": "任务已顺利完成，智能体请停止轮询，可直接向用户汇报视频链接及本地文件。",
                 **result.result_data,
             }
-            self.jobs[job_id] = job_dict
+            if job_id in self.jobs:
+                self.jobs[job_id].update(job_dict)
+            else:
+                self.jobs[job_id] = job_dict
 
             # Schedule next pending task
             self._schedule_next()

@@ -24,7 +24,7 @@ def test_video_create_download_validation():
 
     # Test invalid download resolution
     res_invalid = tool_fn(
-        project_id="test_proj",
+        project_name="test_proj",
         prompt="test prompt",
         mode="frame",
         start_frame="frame1",
@@ -38,7 +38,7 @@ def test_video_create_download_validation():
 
     # Test valid download resolution
     res_valid = tool_fn(
-        project_id="test_proj",
+        project_name="test_proj",
         prompt="test prompt",
         mode="frame",
         start_frame="frame1",

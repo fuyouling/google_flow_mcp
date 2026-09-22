@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Google Flow MCP 集群管理控制台 (PowerShell)
 
@@ -23,8 +23,10 @@
     .\cluster.ps1 status -w   # 持续自动刷新
     .\cluster.ps1 -w          # 快捷持续刷新
 
-    # 4. 独立启动主节点 (Master，仅在不通过智能体启动且希望独立常驻时使用)
-    .\cluster.ps1 master
+    # 5. 后台运行守护进程 (start / stop / restart)
+    .\cluster.ps1 start master
+    .\cluster.ps1 stop
+    .\cluster.ps1 restart master
 #>
 
 [CmdletBinding()]
@@ -38,6 +40,56 @@ Set-Location -Path $PSScriptRoot
 $PythonExec = "python"
 if (Test-Path ".venv\Scripts\python.exe") {
     $PythonExec = ".venv\Scripts\python.exe"
+}
+
+$PidFile = ".cluster.pid"
+
+if ($ScriptArgs.Length -gt 0) {
+    $command = $ScriptArgs[0].ToLower()
+    
+    if ($command -eq "start") {
+        $argsToPass = if ($ScriptArgs.Length -gt 1) { $ScriptArgs[1..($ScriptArgs.Length - 1)] } else { @() }
+        $argList = @("-m", "google_flow_mcp.cluster.launcher") + $argsToPass
+        Write-Host "[*] 正在后台启动集群进程..."
+        $process = Start-Process -FilePath $PythonExec -ArgumentList $argList -PassThru -WindowStyle Hidden -RedirectStandardOutput "cluster.log" -RedirectStandardError "cluster_error.log"
+        $process.Id | Out-File -FilePath $PidFile -Encoding ascii
+        Write-Host "[+] 启动成功！PID: $($process.Id), 日志保存在 cluster.log"
+        exit
+    }
+    elseif ($command -eq "stop") {
+        $killedAny = $false
+        if (Test-Path $PidFile) {
+            $pidStr = (Get-Content $PidFile).Trim()
+            if ($pidStr -match '^\d+$') {
+                Write-Host "[*] 正在停止后台集群进程 (PID: $pidStr)..."
+                Stop-Process -Id $pidStr -Force -ErrorAction SilentlyContinue
+                $killedAny = $true
+            }
+            Remove-Item $PidFile -Force -ErrorAction SilentlyContinue
+        }
+        
+        # 兜底：查找并清理所有相关的 python 进程
+        $strayProcs = Get-CimInstance Win32_Process -Filter "Name = 'python.exe' OR Name = 'pythonw.exe'" | Where-Object { $_.CommandLine -match "google_flow_mcp\.cluster\.launcher" }
+        foreach ($proc in $strayProcs) {
+            Write-Host "[*] 发现残留的集群进程 (PID: $($proc.ProcessId))，正在终止..."
+            Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
+            $killedAny = $true
+        }
+
+        if ($killedAny) {
+            Write-Host "[+] 集群进程已停止。"
+        } else {
+            Write-Host "未找到运行中的集群进程 (.cluster.pid 不存在，且无对应进程)。"
+        }
+        exit
+    }
+    elseif ($command -eq "restart") {
+        $argsToPass = if ($ScriptArgs.Length -gt 1) { $ScriptArgs[1..($ScriptArgs.Length - 1)] } else { @() }
+        & $PSCommandPath stop
+        Start-Sleep -Seconds 2
+        & $PSCommandPath start @argsToPass
+        exit
+    }
 }
 
 & $PythonExec -m google_flow_mcp.cluster.launcher @ScriptArgs

@@ -42,12 +42,10 @@ def register_video_list_tool(mcp: FastMCP) -> None:
             if project_name:
                 cached_videos = ProjectCache.get_project_videos(project_name)
             else:
-                cache_data = ProjectCache.load()
-                # If no project_name provided, grab the first one that has videos
-                for pname, pdata in cache_data.get("projects", {}).items():
+                for pdata in ProjectCache.get_all_projects():
                     if pdata.get("videos") is not None:
                         cached_videos = pdata.get("videos")
-                        project_name = pname
+                        project_name = pdata["name"]
                         break
 
             if cached_videos is not None:
@@ -85,10 +83,9 @@ def register_video_list_tool(mcp: FastMCP) -> None:
                 # but we can try to figure out which project this is from the URL
                 # However, our cache maps names to URLs. We can reverse lookup the name by URL.
                 current_url = tab.url or ""
-                cache_data = ProjectCache.load()
-                for pname, pdata in cache_data.get("projects", {}).items():
+                for pdata in ProjectCache.get_all_projects():
                     if pdata.get("url") and pdata["url"] in current_url:
-                        effective_project_name = pname
+                        effective_project_name = pdata["name"]
                         break
 
             page = FlowVideoPage(tab)

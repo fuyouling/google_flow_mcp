@@ -100,7 +100,7 @@ class TaskManager:
         job_id: str,
         initial_state: dict,
         worker_fn: Callable[[], Any],
-        project_id: str = "",
+        project_name: str = "",
         task_name: str = "",
         params: dict | None = None,
         required_assets: list[str] | None = None,
@@ -131,7 +131,7 @@ class TaskManager:
                 tt = tt_map.get(task_type.lower(), TaskType.VIDEO_CREATE)
                 self._cluster_scheduler.submit_task(
                     task_type=tt,
-                    project_alias=project_id,
+                    project_alias=project_name,
                     params=params or {},
                     required_assets=required_assets or [],
                     job_id=job_id,
@@ -189,7 +189,7 @@ class TaskManager:
                 "job_id": job_id,
                 "task_type": task_type,
                 "task_name": task_name or f"{task_type}_{job_id[:8]}",
-                "project_id": project_id,
+                "project_name": project_name,
                 "worker_fn": worker_fn,
                 "created_at": now,
                 "cancel_requested": False,
@@ -423,7 +423,7 @@ class TaskManager:
                         "job_id": c_id,
                         "task_type": self._current_task.get("task_type", "unknown"),
                         "task_name": self._current_task.get("task_name", ""),
-                        "project_id": self._current_task.get("project_id", ""),
+                        "project_name": self._current_task.get("project_name", ""),
                         "status": c_state.get("status", "generating"),
                         "progress_percent": c_state.get("progress_percent", 0),
                         "elapsed_seconds": c_state.get("elapsed_seconds", 0),
@@ -447,7 +447,7 @@ class TaskManager:
                     "job_id": q_id,
                     "task_type": item.get("task_type", "unknown"),
                     "task_name": item.get("task_name", ""),
-                    "project_id": item.get("project_id", ""),
+                    "project_name": item.get("project_name", ""),
                     "wait_seconds": round(now - item.get("created_at", now), 1),
                     "message": q_state.get("message", "")
                 })

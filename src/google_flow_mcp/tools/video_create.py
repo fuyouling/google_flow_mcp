@@ -350,15 +350,11 @@ def register_video_create_tool(mcp: FastMCP) -> None:
         """
         # 0. Resolve project_name to project_url
         from google_flow_mcp.models.project_cache import ProjectCache
-        cache = ProjectCache.load()
-        projects = cache.get("projects", {})
-        
         if not project_name or not project_name.strip():
+            projects = ProjectCache.get_all_projects()
             if projects:
-                project_name = max(
-                    projects.keys(),
-                    key=lambda k: projects[k].get("last_accessed", "")
-                )
+                default_proj = max(projects, key=lambda p: p.get("last_accessed", ""))
+                project_name = default_proj["name"]
                 logger.info(f"video_create: project_name not provided, defaulting to latest project: {project_name}")
             else:
                 return json.dumps({
@@ -467,6 +463,15 @@ def register_video_create_tool(mcp: FastMCP) -> None:
                     page.get(project_url)
                     time.sleep(4)
 
+                # If cached URL is invalid, we might be redirected away from the project page
+                if "/project/" not in page.url:
+                    logger.warning(f"Cached URL {project_url} seems invalid. Forcing sync...")
+                    project_url = ensure_project_exists(project_name, browser, force_sync=True)
+                    if page.url != project_url:
+                        page.get(project_url)
+                        time.sleep(4)
+
+
                 # 2. Apply settings
                 qty_str = f"x{quantity}"
                 apply_video_settings(
@@ -493,24 +498,19 @@ def register_video_create_tool(mcp: FastMCP) -> None:
                 time.sleep(1)
 
                 # 5. Wait for generate button
+                gen_btn = None
                 for _ in range(10):
-                    btns = page.eles('tag:button')
-                    gen_candidates = [b for b in btns if 'generate-icon-button' in (b.attr('class') or '')]
-                    if gen_candidates and not gen_candidates[0].attr('disabled'):
+                    submit_btn = page.ele('xpath://button[@type="submit"]')
+                    if submit_btn and not submit_btn.attr("disabled"):
+                        gen_btn = submit_btn
                         break
                     time.sleep(0.5)
-
-                gen_btn = None
-                for b in page.eles('tag:button'):
-                    if 'generate-icon-button' in (b.attr('class') or ''):
-                        gen_btn = b
-                        break
 
                 if not gen_btn:
                     raise Exception("Generate button not found")
 
                 # Click generate button
-                gen_btn.click(by_js=True)
+                gen_btn.click()
                 logger.info(f"Video job {job_id}: Clicked generate button.")
 
                 _video_jobs[job_id].update({
@@ -587,7 +587,7 @@ def register_video_create_tool(mcp: FastMCP) -> None:
                     raise Exception(f"视频生成超时（超过 {total_timeout} 秒未完成）")
 
                 # 3. Get video URL directly from the list view
-                time.sleep(2)
+                time.sleep(0.5)
                 video_url = ""
                 video_tag = page.ele('xpath:(//video)[1]', timeout=5)
                 if video_tag:
@@ -607,7 +607,7 @@ def register_video_create_tool(mcp: FastMCP) -> None:
                     logger.warning(f"Direct click on tile failed: {e}, trying click(by_js=True)")
                     tile.click(by_js=True)
 
-                time.sleep(3)
+                time.sleep(0.5)
 
                 from google_flow_mcp.pages.video_edit_page import VideoEditPage
                 edit_page = VideoEditPage(page)
@@ -642,7 +642,7 @@ def register_video_create_tool(mcp: FastMCP) -> None:
                     if download and video_local_path:
                         msg += f"，{download} 视频已下载至 {video_local_path}"
 
-                _video_jobs[job_id] = {
+                _video_jobs[job_id].update({
                     "job_id": job_id,
                     "status": status,
                     "is_finished": True,
@@ -669,13 +669,13 @@ def register_video_create_tool(mcp: FastMCP) -> None:
                         "quantity": quantity,
                         "download": download,
                     }
-                }
+                })
                 logger.info(f"Video job {job_id} completed with status {status} in {total_time}s")
 
             except Exception as e:
                 total_time = round(time.time() - t0, 1)
                 logger.error(f"Video job {job_id} failed: {e}")
-                _video_jobs[job_id] = {
+                _video_jobs[job_id].update({
                     "job_id": job_id,
                     "status": "error",
                     "is_finished": True,
@@ -683,7 +683,7 @@ def register_video_create_tool(mcp: FastMCP) -> None:
                     "message": f"视频生成任务失败: {str(e)}",
                     "elapsed_seconds": total_time,
                     "next_action": "任务执行失败，智能体请停止轮询，可向用户汇报具体失败原因。"
-                }
+                })
 
         task_params = {
             "project_name": project_name,
@@ -714,7 +714,7 @@ def register_video_create_tool(mcp: FastMCP) -> None:
             job_id=job_id,
             initial_state=_video_jobs[job_id],
             worker_fn=task_worker,
-            project_id=project_name,
+            project_name=project_name,
             task_name=video_name or f"video_{job_id[:8]}",
             params=task_params,
             required_assets=required_assets,

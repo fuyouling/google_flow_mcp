@@ -1,5 +1,6 @@
 import json
 import uuid
+import time
 from pathlib import Path
 from typing import Annotated
 from pydantic import Field
@@ -70,15 +71,11 @@ def register_character_create_by_upload_tool(mcp: FastMCP) -> None:
 
         # 0. Resolve project_name
         from google_flow_mcp.models.project_cache import ProjectCache
-        cache = ProjectCache.load()
-        projects = cache.get("projects", {})
-        
         if not project_name or not project_name.strip():
+            projects = ProjectCache.get_all_projects()
             if projects:
-                project_name = max(
-                    projects.keys(),
-                    key=lambda k: projects[k].get("last_accessed", "")
-                )
+                default_proj = max(projects, key=lambda p: p.get("last_accessed", ""))
+                project_name = default_proj["name"]
                 logger.info(f"character_create_by_upload: project_name not provided, defaulting to latest project: {project_name}")
             else:
                 project_name = "default"
@@ -106,17 +103,26 @@ def register_character_create_by_upload_tool(mcp: FastMCP) -> None:
                 # Step 1 & 2: Navigate to characters page
                 from google_flow_mcp.utils.project_utils import ensure_project_exists
                 project_url = ensure_project_exists(project_name, browser)
+                if page.tab.url != project_url:
+                    page.tab.get(project_url)
+                    time.sleep(4)
+                
+                # If cached URL is invalid, we might be redirected away from the project page
+                if "/project/" not in page.tab.url:
+                    logger.warning(f"Cached URL {project_url} seems invalid. Forcing sync...")
+                    project_url = ensure_project_exists(project_name, browser, force_sync=True)
+                
                 page.navigate_to_characters(project_url)
 
                 # Step 3: Click 'New Character'
                 if not page.click_new_character():
-                    task_manager.jobs[job_id] = {
+                    task_manager.jobs[job_id].update({
                         "job_id": job_id,
                         "status": "error",
                         "is_finished": True,
                         "error": "Failed to open character editor.",
                         "message": "打开角色编辑器失败。"
-                    }
+                    })
                     return
 
                 # Step 4: Upload Portrait
@@ -137,7 +143,7 @@ def register_character_create_by_upload_tool(mcp: FastMCP) -> None:
                 page.save_character()
 
                 msg = f"虚拟角色 {character_name} 上传创建成功。"
-                task_manager.jobs[job_id] = {
+                task_manager.jobs[job_id].update({
                     "job_id": job_id,
                     "status": "completed",
                     "is_finished": True,
@@ -145,18 +151,18 @@ def register_character_create_by_upload_tool(mcp: FastMCP) -> None:
                     "portrait_image_path": str(Path(portrait_image_path).resolve()),
                     "fullbody_image_path": str(Path(fullbody_image_path).resolve()) if fullbody_image_path else "",
                     "message": msg
-                }
+                })
                 logger.info(f"Background character upload job {job_id} completed successfully for {character_name}")
 
             except Exception as e:
                 logger.error(f"Background character upload job {job_id} failed: {str(e)}")
-                task_manager.jobs[job_id] = {
+                task_manager.jobs[job_id].update({
                     "job_id": job_id,
                     "status": "error",
                     "is_finished": True,
                     "error": str(e),
                     "message": f"虚拟角色上传创建失败: {str(e)}"
-                }
+                })
 
         task_params = {
             "project_name": project_name,
@@ -171,7 +177,7 @@ def register_character_create_by_upload_tool(mcp: FastMCP) -> None:
             job_id=job_id,
             initial_state=initial_state,
             worker_fn=task_worker,
-            project_id=project_name,
+            project_name=project_name,
             task_name=f"upload_{formatted_name}",
             params=task_params,
         )

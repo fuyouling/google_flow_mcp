@@ -21,7 +21,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() in ("gbk", "gb2312", "cp9
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 # ── 测试参数（请根据实际环境调整） ──────────────────────────────────
-PROJECT_ID           = "41ffbc19-48f6-44c0-8b2a-4745e26ddc74"  # 目标项目 ID
+PROJECT_NAME   = "TestProject"  # 目标项目 ID
 VIDEO_NAME           = "Uploaded Test Video"                    # 视频名称（自动转为 Uploaded_Test_Video）
 VIDEO_PATH           = r"C:\Users\zgh\Downloads\google_flow\scene04_abandoned_banquet_omni_1080p_20260920052508.mp4"
 MAX_WAIT             = 180  # 上传视频可能稍大，最多等待 3 分钟
@@ -55,7 +55,7 @@ async def poll_status(session: ClientSession, job_id: str, max_wait: int = MAX_W
 async def main():
     print("=" * 60)
     print("🚀 测试 video_create_by_upload 工具")
-    print(f"   项目 ID: {PROJECT_ID}")
+    print(f"   项目 ID: {PROJECT_NAME}")
     print(f"   视频名称: {VIDEO_NAME}")
     print(f"   本地视频: {VIDEO_PATH}")
     print("=" * 60)
@@ -81,7 +81,7 @@ async def main():
             # 2. 发起视频上传创建
             print("\n▶️ 发起视频上传创建请求...")
             args = {
-                "project_id": PROJECT_ID,
+                "project_name": PROJECT_NAME,
                 "video_name": VIDEO_NAME,
                 "video_path": VIDEO_PATH
             }

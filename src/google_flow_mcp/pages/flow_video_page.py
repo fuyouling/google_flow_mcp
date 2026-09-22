@@ -179,13 +179,13 @@ class FlowVideoPage(BasePage):
 
         # 5. Click first tile to enter details/edit interface
         logger.info("Clicking uploaded video tile to enter details page...")
-        time.sleep(1)
+        time.sleep(0.5)
         try:
             uploaded_tile.click()
         except Exception as e:
             logger.warning(f"Direct click on tile failed: {e}, trying JS click...")
             uploaded_tile.click(by_js=True)
-        time.sleep(3)
+        time.sleep(0.5)
         return True
 
     def rename_and_save_in_detail(self, new_name: str, timeout: int = 15) -> bool:

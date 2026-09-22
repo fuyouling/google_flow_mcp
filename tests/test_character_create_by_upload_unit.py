@@ -36,7 +36,7 @@ def test_character_create_by_upload_tool_schema():
     tool = mcp._tool_manager.get_tool("character_create_by_upload")
     assert tool is not None
     props = tool.parameters["properties"]
-    assert "project_id" in props
+    assert "project_name" in props
     assert "character_name" in props
     assert "portrait_image_path" in props
     assert "fullbody_image_path" in props
@@ -56,7 +56,7 @@ def test_character_create_by_upload_empty_name():
     tool_fn = tool.fn
 
     res_str = tool_fn(
-        project_id="proj_1",
+        project_name="proj_1",
         character_name="   ",
         portrait_image_path="some_path.png"
     )
@@ -74,7 +74,7 @@ def test_character_create_by_upload_file_not_found():
 
     # 1. Non-existent portrait file
     res_str = tool_fn(
-        project_id="proj_1",
+        project_name="proj_1",
         character_name="Hero Name",
         portrait_image_path="non_existent_portrait_file_12345.png"
     )
@@ -88,7 +88,7 @@ def test_character_create_by_upload_file_not_found():
 
     try:
         res_str2 = tool_fn(
-            project_id="proj_1",
+            project_name="proj_1",
             character_name="Hero Name",
             portrait_image_path=tmp_portrait,
             fullbody_image_path="non_existent_fullbody_file_99999.png"
@@ -217,10 +217,11 @@ def test_character_create_by_upload_worker_success():
 
     try:
         with patch("google_flow_mcp.tools.character_create_by_upload.get_browser", return_value=mock_browser), \
+         patch("google_flow_mcp.utils.project_utils.ensure_project_exists", return_value="TestProject"), \
              patch("google_flow_mcp.tools.character_create_by_upload.FlowCharacterPage", return_value=mock_page):
 
             res_json = tool_fn(
-                project_id="proj_upload_1",
+                project_name="proj_upload_1",
                 character_name="Test Knight Hero",
                 portrait_image_path=p_path,
                 fullbody_image_path=fb_path,
@@ -245,7 +246,7 @@ def test_character_create_by_upload_worker_success():
             assert status["fullbody_image_path"] == str(Path(fb_path).resolve())
 
             # Verify steps executed in order
-            mock_page.navigate_to_characters.assert_called_once_with("proj_upload_1")
+            mock_page.navigate_to_characters.assert_called_once_with("TestProject")
             mock_page.click_new_character.assert_called_once()
             mock_page.upload_portrait.assert_called_once_with(p_path)
             mock_page.upload_fullbody.assert_called_once_with(fb_path)

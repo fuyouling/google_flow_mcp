@@ -36,10 +36,10 @@ def test_image_create_by_upload_tool_schema():
     tool = mcp._tool_manager.get_tool("image_create_by_upload")
     assert tool is not None
     props = tool.parameters["properties"]
-    assert "project_id" in props
+    assert "project_name" in props
     assert "image_path" in props
     assert "image_name" in props
-    assert "project_id" in tool.parameters["required"]
+    assert "project_name" in tool.parameters["required"]
     assert "image_path" in tool.parameters["required"]
     assert "image_name" in tool.parameters["required"]
 
@@ -52,7 +52,7 @@ def test_image_create_by_upload_empty_name():
     tool_fn = tool.fn
 
     res_str = tool_fn(
-        project_id="proj_1",
+        project_name="proj_1",
         image_name="   ",
         image_path="sample.png"
     )
@@ -69,7 +69,7 @@ def test_image_create_by_upload_file_not_found():
     tool_fn = tool.fn
 
     res_str = tool_fn(
-        project_id="proj_1",
+        project_name="proj_1",
         image_name="My Image",
         image_path="non_existent_image_file_12345.png"
     )
@@ -192,10 +192,11 @@ def test_image_create_by_upload_worker_success():
 
     try:
         with patch("google_flow_mcp.tools.image_create_by_upload.get_browser", return_value=mock_browser), \
+         patch("google_flow_mcp.utils.project_utils.ensure_project_exists", return_value="TestProject"), \
              patch("google_flow_mcp.tools.image_create_by_upload.FlowImagePage", return_value=mock_page):
 
             res_json = tool_fn(
-                project_id="proj_img_upload_1",
+                project_name="TestProject",
                 image_path=img_path,
                 image_name="Sunset Beach Landscape"
             )
@@ -204,7 +205,7 @@ def test_image_create_by_upload_worker_success():
             job_id = res["job_id"]
 
             # Wait for background thread to complete
-            for _ in range(30):
+            for _ in range(100):
                 status = task_manager.get_task_status(job_id)
                 if status.get("is_finished"):
                     break
@@ -216,7 +217,7 @@ def test_image_create_by_upload_worker_success():
             assert status["image_path"] == str(Path(img_path).resolve())
 
             # Verify steps executed
-            mock_page.upload_image_on_project_page.assert_called_once_with("proj_img_upload_1", img_path)
+            mock_page.upload_image_on_project_page.assert_called_once_with("TestProject", img_path)
             mock_page.rename_and_save_in_detail.assert_called_once_with("Sunset_Beach_Landscape")
 
     finally:

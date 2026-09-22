@@ -47,7 +47,7 @@ def get_tool(server: FastMCP, tool_name: str):
 def test_image_create_invalid_download(mcp_server):
     image_create_fn = get_tool(mcp_server, "image_create")
     res_raw = image_create_fn(
-        project_id="proj_1",
+        project_name="proj_1",
         prompt="A cute cat",
         download="4K"
     )
@@ -65,7 +65,7 @@ def test_image_create_and_status_lifecycle(mcp_server):
 
     # 1. Start job
     res_raw = image_create_fn(
-        project_id="proj_1",
+        project_name="proj_1",
         prompt="A beautiful sunrise",
         download="1K"
     )
@@ -151,7 +151,7 @@ def test_video_create_validation_and_lifecycle(mcp_server):
 
     # 1. Validation error: missing start_frame in frame mode
     res_raw = video_create_fn(
-        project_id="proj_1",
+        project_name="proj_1",
         prompt="A dog running",
         mode="frame",
         start_frame="",
@@ -166,7 +166,7 @@ def test_video_create_validation_and_lifecycle(mcp_server):
 
     # 2. Validation error: invalid download resolution
     res_raw = video_create_fn(
-        project_id="proj_1",
+        project_name="proj_1",
         prompt="A dog running",
         mode="frame",
         start_frame="f1",
@@ -181,7 +181,7 @@ def test_video_create_validation_and_lifecycle(mcp_server):
 
     # 3. Valid job start
     res_raw = video_create_fn(
-        project_id="proj_1",
+        project_name="proj_1",
         prompt="A cinematic drone shot",
         mode="frame",
         start_frame="f1",
@@ -266,7 +266,7 @@ def test_video_status_not_found(mcp_server):
 def test_video_create_veo_asset_warning(mcp_server):
     video_create_fn = get_tool(mcp_server, "video_create")
     res_raw = video_create_fn(
-        project_id="proj_1",
+        project_name="proj_1",
         prompt="A dog playing in the garden",
         model_name="Veo 3.1 - Quality",
         mode="asset",

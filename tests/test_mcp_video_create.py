@@ -22,7 +22,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() in ("gbk", "gb2312", "cp9
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 # ── 测试参数 ─────────────────────────────────────────────
-PROJECT_ID   = "41ffbc19-48f6-44c0-8b2a-4745e26ddc74"  # 目标项目 ID (留空 "" 则自动选用最近访问的项目)
+PROJECT_NAME   = "TestProject"  # 目标项目 ID (留空 "" 则自动选用最近访问的项目)
 PROMPT       = "Mary Lennox 和 Officer Barney 正在吃饭"
 VIDEO_NAME   = "SE_03_VIDEO"
 MODEL_NAME   = "Veo 3.1 - Lite"  # 可选: "Omni 1.1 Flash", "Veo 3.1 - Lite", "Veo 3.1 - Fast", "Veo 3.1 - Quality"
@@ -69,7 +69,7 @@ async def main():
     print("=" * 60)
     print("  MCP video_create 集成测试")
     print("=" * 60)
-    print(f"  project_id  : {PROJECT_ID!r} (留空自动选用最近项目)")
+    print(f"  project_name  : {PROJECT_NAME!r} (留空自动选用最近项目)")
     print(f"  prompt      : {PROMPT}")
     print(f"  video_name  : {VIDEO_NAME}")
     print(f"  model_name  : {MODEL_NAME}")
@@ -103,7 +103,7 @@ async def main():
                 "video_create",
                 arguments={
                     "prompt":       PROMPT,
-                    "project_id":   PROJECT_ID,
+                    "project_name":   PROJECT_NAME,
                     "video_name":   VIDEO_NAME,
                     "model_name":   MODEL_NAME,
                     "mode":         MODE,

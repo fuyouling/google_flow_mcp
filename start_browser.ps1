@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Google Flow MCP 独立浏览器常驻启动与管理脚本 (PowerShell)
 

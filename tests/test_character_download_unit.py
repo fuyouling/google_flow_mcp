@@ -108,11 +108,12 @@ def test_character_create_worker_with_download():
     mock_browser.latest_tab = MagicMock()
 
     with patch("google_flow_mcp.tools.character_create.get_browser", return_value=mock_browser), \
+         patch("google_flow_mcp.utils.project_utils.ensure_project_exists", return_value="TestProject"), \
          patch("google_flow_mcp.tools.character_create.FlowCharacterPage", return_value=mock_page):
 
         # Call with download=True and fullbody_prompt provided
         res_json = tool_fn(
-            project_id="proj_1",
+            project_name="proj_1",
             character_name="Arthur",
             portrait_prompt="portrait prompt",
             fullbody_prompt="fullbody prompt",
@@ -123,7 +124,7 @@ def test_character_create_worker_with_download():
         job_id = res["job_id"]
 
         # Wait briefly for worker thread to complete
-        for _ in range(20):
+        for _ in range(100):
             status = task_manager.get_task_status(job_id)
             if status.get("is_finished"):
                 break

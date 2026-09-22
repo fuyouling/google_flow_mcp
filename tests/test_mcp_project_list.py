@@ -59,7 +59,7 @@ async def main() -> bool:
 
             # 3. 解析并验证结果
             # project_list 返回格式：
-            #   dict  → {project_id: {"name": ..., "url": ...}, ...}
+            #   dict  → {project_name: {"name": ..., "url": ...}, ...}
             #   list  → [{"id": ..., "name": ..., "url": ...}, ...]  (未来可能)
             data = json.loads(raw)
 
@@ -68,7 +68,7 @@ async def main() -> bool:
                 return False
 
             if isinstance(data, dict):
-                # 标准格式：{project_id: {name, url}}
+                # 标准格式：{project_name: {name, url}}
                 projects = [{"id": pid, **info} for pid, info in data.items()]
             elif isinstance(data, list):
                 projects = data
@@ -83,7 +83,7 @@ async def main() -> bool:
             print(f"\n✅ 共获取到 {len(projects)} 个项目:")
             for i, proj in enumerate(projects, 1):
                 name = proj.get("name") or proj.get("title") or str(proj)
-                pid  = proj.get("id") or proj.get("project_id") or ""
+                pid  = proj.get("id") or proj.get("project_name") or ""
                 url  = proj.get("url") or ""
                 print(f"   {i:2d}. {name}  (id: {pid})")
                 if url:

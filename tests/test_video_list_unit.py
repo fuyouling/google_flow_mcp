@@ -4,11 +4,27 @@ from unittest.mock import MagicMock, patch
 from google_flow_mcp.models.project_cache import ProjectCache
 
 
+from google_flow_mcp.models.db import init_db
+
+@pytest.fixture(autouse=True)
+def clean_cache_db(tmp_path, monkeypatch):
+    db_path = tmp_path / "flow_cache.db"
+    monkeypatch.setenv("FLOW_CACHE_DB", str(db_path))
+    monkeypatch.setattr("google_flow_mcp.models.db.DB_FILE", str(db_path))
+    init_db()
+    yield db_path
+    if db_path.exists():
+        try:
+            db_path.unlink()
+        except:
+            pass
+
+
+
 def test_project_cache_videos(tmp_path, monkeypatch):
     test_cache_file = str(tmp_path / "test_projects_cache.json")
-    monkeypatch.setattr("google_flow_mcp.models.project_cache.CACHE_FILE", test_cache_file)
 
-    ProjectCache.update_project("proj-vid-1", "Video Project", "https://flow.google.com/project/proj-vid-1")
+    ProjectCache.update_project("proj-vid-1", "https://flow.google.com/project/proj-vid-1")
     
     videos = [
         {"index": 1, "name": "镜头A_特写", "thumbnail_url": "https://example.com/v1.png"},
@@ -19,17 +35,16 @@ def test_project_cache_videos(tmp_path, monkeypatch):
     cached_videos = ProjectCache.get_project_videos("proj-vid-1")
     assert cached_videos == videos
 
-    proj = ProjectCache.get_project_by_id("proj-vid-1")
-    assert proj["name"] == "Video Project"
+    proj = ProjectCache.get_project_by_name("proj-vid-1")
+    assert proj["name"] == "proj-vid-1"
     assert proj["videos"] == videos
 
 
 def test_video_list_when_browser_busy(tmp_path, monkeypatch):
     test_cache_file = str(tmp_path / "test_projects_cache.json")
-    monkeypatch.setattr("google_flow_mcp.models.project_cache.CACHE_FILE", test_cache_file)
 
     videos = [{"index": 1, "name": "已缓存视频", "thumbnail_url": "https://example.com/cached.mp4"}]
-    ProjectCache.update_project("proj-busy-vid", "Busy Vid Project", "https://flow.google.com/project/proj-busy-vid")
+    ProjectCache.update_project("Busy Vid Project", "https://flow.google.com/project/proj-busy-vid")
     ProjectCache.update_project_videos("proj-busy-vid", videos)
 
     from google_flow_mcp.tools.video_list import register_video_list_tool
@@ -49,7 +64,7 @@ def test_video_list_when_browser_busy(tmp_path, monkeypatch):
 
     with patch("google_flow_mcp.tools.video_list.task_manager.is_browser_busy") as mock_busy:
         mock_busy.return_value = (True, {"job_id": "job-vid-999", "task_type": "图片生成"})
-        res_raw = tool_func(project_id="proj-busy-vid")
+        res_raw = tool_func(project_name="proj-busy-vid")
         data = json.loads(res_raw)
         assert data["success"] is True
         assert data["is_cached"] is True
@@ -60,7 +75,6 @@ def test_video_list_when_browser_busy(tmp_path, monkeypatch):
 
 def test_video_list_no_videos_button(tmp_path, monkeypatch):
     test_cache_file = str(tmp_path / "test_projects_cache.json")
-    monkeypatch.setattr("google_flow_mcp.models.project_cache.CACHE_FILE", test_cache_file)
 
     from google_flow_mcp.tools.video_list import register_video_list_tool
     mock_mcp = MagicMock()
@@ -85,7 +99,7 @@ def test_video_list_no_videos_button(tmp_path, monkeypatch):
         mock_tab.eles.return_value = []
         mock_browser.latest_tab = mock_tab
 
-        res_raw = tool_func(project_id="proj-empty-vid")
+        res_raw = tool_func(project_name="proj-empty-vid")
         data = json.loads(res_raw)
 
         assert data["success"] is True
@@ -141,7 +155,7 @@ def test_video_list_success_with_tiles(monkeypatch):
         mock_tab.eles.return_value = [tile1]
         mock_browser.return_value.latest_tab = mock_tab
 
-        res_raw = tool_func(project_id="proj-vid-tiles")
+        res_raw = tool_func(project_name="proj-vid-tiles")
         data = json.loads(res_raw)
 
         assert data["success"] is True

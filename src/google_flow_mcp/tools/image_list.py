@@ -42,11 +42,10 @@ def register_image_list_tool(mcp: FastMCP) -> None:
             if project_name:
                 cached_images = ProjectCache.get_project_images(project_name)
             else:
-                cache_data = ProjectCache.load()
-                for pname, pdata in cache_data.get("projects", {}).items():
+                for pdata in ProjectCache.get_all_projects():
                     if pdata.get("images") is not None:
                         cached_images = pdata.get("images")
-                        project_name = pname
+                        project_name = pdata["name"]
                         break
 
             if cached_images is not None:
@@ -81,10 +80,9 @@ def register_image_list_tool(mcp: FastMCP) -> None:
                     logger.warning(f"Project '{effective_project_name}' not found in cache or missing URL.")
             else:
                 current_url = tab.url or ""
-                cache_data = ProjectCache.load()
-                for pname, pdata in cache_data.get("projects", {}).items():
+                for pdata in ProjectCache.get_all_projects():
                     if pdata.get("url") and pdata["url"] in current_url:
-                        effective_project_name = pname
+                        effective_project_name = pdata["name"]
                         break
 
             page = FlowImagePage(tab)

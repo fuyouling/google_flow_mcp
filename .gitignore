@@ -52,3 +52,9 @@ docs/
 .agents
 
 .kilo/
+
+*.db
+*.db-wal
+*.db-shm
+
+*.log

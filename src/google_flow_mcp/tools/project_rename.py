@@ -44,7 +44,7 @@ def register_project_rename_tool(mcp: FastMCP) -> None:
             page = FlowHomePage(browser.latest_tab)
             page.open()
             
-            success = page.rename_project(project_name, new_name)
+            success = page.rename_project(new_title=new_name, old_title=project_name)
             if success:
                 # Also we might want to refresh cache here, or let the user do project_list(force_refresh=True)
                 # But at minimum, we should update ProjectCache here locally? 
@@ -52,9 +52,7 @@ def register_project_rename_tool(mcp: FastMCP) -> None:
                 # However, for convenience we can update it in ProjectCache locally.
                 url = proj.get("url")
                 # Remove the old one, add the new one.
-                ProjectCache.delete_project(project_name)
-                if url:
-                    ProjectCache.update_project(new_name, url)
+                ProjectCache.rename_project_for_worker(project_name, new_name)
                 return json.dumps({"success": True, "old_name": project_name, "new_name": new_name}, ensure_ascii=False)
             else:
                 return json.dumps({"error": "Failed to rename project via UI."}, ensure_ascii=False)

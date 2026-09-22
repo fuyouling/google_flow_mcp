@@ -22,7 +22,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() in ("gbk", "gb2312", "cp9
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 # ── 测试参数（请根据实际环境调整） ──────────────────────────────────
-PROJECT_ID           = "41ffbc19-48f6-44c0-8b2a-4745e26ddc74"  # 目标项目 ID
+PROJECT_NAME   = "TestProject"  # 目标项目 ID
 CHARACTER_NAME       = "Test_Hero"                              # 角色名称（会自动将空格转为下划线 Test_Hero）
 PORTRAIT_IMAGE_PATH  = r"C:\Users\zgh\Downloads\google_flow\Test_Hero_Portrait.jpeg"
 FULLBODY_IMAGE_PATH  = r"C:\Users\zgh\Downloads\google_flow\Test_Hero_Fullbody.jpeg"
@@ -59,7 +59,7 @@ async def poll_status(session: ClientSession, job_id: str, max_wait: int = MAX_W
 async def main():
     print("=" * 60)
     print("🚀 测试 character_create_by_upload 工具")
-    print(f"   项目 ID: {PROJECT_ID}")
+    print(f"   项目 ID: {PROJECT_NAME}")
     print(f"   角色名称: {CHARACTER_NAME}")
     print(f"   头像路径: {PORTRAIT_IMAGE_PATH}")
     print(f"   全身像路径: {FULLBODY_IMAGE_PATH}")
@@ -88,7 +88,7 @@ async def main():
             # 2. 调用 character_create_by_upload 工具
             print("\n▶️ 发起角色上传创建请求...")
             args = {
-                "project_id": PROJECT_ID,
+                "project_name": PROJECT_NAME,
                 "character_name": CHARACTER_NAME,
                 "portrait_image_path": PORTRAIT_IMAGE_PATH,
                 "fullbody_image_path": FULLBODY_IMAGE_PATH if Path(FULLBODY_IMAGE_PATH).is_file() else "",

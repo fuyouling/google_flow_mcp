@@ -188,6 +188,22 @@ def website_open(
                 is_homepage=is_homepage,
             )
 
+            if is_homepage:
+                try:
+                    from google_flow_mcp.pages.flow_home_page import FlowHomePage
+                    from google_flow_mcp.models.project_cache import ProjectCache
+                    
+                    logger.info("Initializing project list to database...")
+                    page = FlowHomePage(tab)
+                    projects = page.get_projects()
+                    
+                    for title, proj_data in projects.items():
+                        ProjectCache.update_project(title, proj_data["url"])
+                        
+                    logger.info(f"Successfully initialized {len(projects)} projects to database.")
+                except Exception as e:
+                    logger.warning(f"website_open: Failed to initialize project list: {e}")
+
         data = {
             "title": tab.title,
             "url": tab.url,

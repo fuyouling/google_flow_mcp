@@ -22,14 +22,14 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() in ("gbk", "gb2312", "cp9
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 # ── 测试参数 ─────────────────────────────────────────────
-PROJECT_ID   = "41ffbc19-48f6-44c0-8b2a-4745e26ddc74"  # 目标项目 ID (留空 "" 则自动选用最近访问的项目)
-PROMPT       = "Mary Lennox 和 Officer Barney 正在吃饭"
-IMAGE_NAME   = "SE_06"
-ASSETS       = "Mary Lennox,Officer Barney"
+PROJECT_NAME   = "qqqq"  # 目标项目 ID (留空 "" 则自动选用最近访问的项目)
+PROMPT       = "A Cyanopica cyanus flies in the sky"
+IMAGE_NAME   = "Cyanopica cyanus"
+ASSETS       = ""
 ASPECT_RATIO = "16:9"
 MODEL_NAME   = "Nano Banana Pro"
 QUANTITY     = 1
-DOWNLOAD     = "1K"              # 可选: "1K", "2K"，留空 "" 则不自动下载
+DOWNLOAD     = "2K"              # 可选: "1K", "2K"，留空 "" 则不自动下载
 MAX_WAIT     = 180               # 最多等待 180s (3分钟)
 # ─────────────────────────────────────────────────────────
 
@@ -64,7 +64,7 @@ async def main():
     print("=" * 60)
     print("  MCP image_create 集成测试")
     print("=" * 60)
-    print(f"  project_id   : {PROJECT_ID!r} (留空自动选用最近项目)")
+    print(f"  project_name   : {PROJECT_NAME!r} (留空自动选用最近项目)")
     print(f"  prompt       : {PROMPT}")
     print(f"  image_name   : {IMAGE_NAME}")
     print(f"  assets       : {ASSETS}")
@@ -93,7 +93,7 @@ async def main():
                 "image_create",
                 arguments={
                     "prompt":       PROMPT,
-                    "project_id":   PROJECT_ID,
+                    "project_name":   PROJECT_NAME,
                     "assets":       ASSETS,
                     "image_name":   IMAGE_NAME,
                     "aspect_ratio": ASPECT_RATIO,

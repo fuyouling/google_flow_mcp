@@ -68,22 +68,27 @@ class FlowHomePage(BasePage):
         logger.info(f"Extracted {len(result)} projects.")
         return result
 
-    def rename_project(self, old_title: str, new_title: str) -> bool:
+    def rename_project(self, new_title: str, old_title: str = None, project_uuid: str = None) -> bool:
         """
-        Rename a project by its old title.
-        Using old_title to find the specific card.
+        Rename a project by its UUID or old title.
         """
-        logger.info(f"Attempting to rename project from '{old_title}' to '{new_title}'...")
+        logger.info(f"Attempting to rename project to '{new_title}' (uuid={project_uuid}, old_title={old_title})...")
         cards = self.tab.eles('css:flow-project-card')
         target_card = None
         for card in cards:
-            title_div = card.ele('css:div.project-title-label')
-            if title_div and old_title in title_div.text:
-                target_card = card
-                break
+            if project_uuid:
+                link_ele = card.ele('css:a.project-thumbnail-container')
+                if link_ele and link_ele.attr('href') and project_uuid in link_ele.attr('href'):
+                    target_card = card
+                    break
+            elif old_title:
+                title_div = card.ele('css:div.project-title-label')
+                if title_div and old_title in title_div.text:
+                    target_card = card
+                    break
                 
         if not target_card:
-            logger.error(f"Card for project '{old_title}' not found.")
+            logger.error(f"Card for project not found (uuid={project_uuid}, old_title={old_title}).")
             return False
             
         # Click the edit button nested in the title div
@@ -126,6 +131,7 @@ class FlowHomePage(BasePage):
         if not new_btn:
             raise Exception("Could not find the 'New Project' button on the home page.")
             
+        old_url = self.tab.url
         new_btn.click()
         
         # Wait for navigation to /project/
@@ -135,16 +141,15 @@ class FlowHomePage(BasePage):
         current_url = self.tab.url
         while time.time() - start_time < timeout:
             current_url = self.tab.url
-            match = re.search(r'/project/([a-zA-Z0-9\-]+)', current_url)
-            if match:
-                break
+            if current_url != old_url:
+                match = re.search(r'/project/([a-zA-Z0-9\-]+)', current_url)
+                if match:
+                    break
             time.sleep(0.5)
         
         if match:
             new_id = match.group(1)
             logger.info(f"New project created with UUID: {new_id}")
-            # Save to cache with a default name (Untitled)
-            ProjectCache.update_project(new_id, "Untitled project", current_url)
             return new_id
         else:
             raise Exception(f"Failed to extract project ID from URL after waiting {timeout}s: {current_url}")

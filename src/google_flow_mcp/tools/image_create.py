@@ -109,12 +109,10 @@ def register_image_create_tool(mcp: FastMCP) -> None:
         effective_project_name = project_name.strip()
         # 0. Resolve empty project_name to the most recently accessed project
         if not effective_project_name:
-            local_projs = ProjectCache.load().get("projects", {})
-            if local_projs:
-                effective_project_name = max(
-                    local_projs.keys(),
-                    key=lambda k: local_projs[k].get("last_accessed", "")
-                )
+            projects = ProjectCache.get_all_projects()
+            if projects:
+                default_proj = max(projects, key=lambda p: p.get("last_accessed", ""))
+                effective_project_name = default_proj["name"]
                 logger.info(f"image_create: project_name not provided, defaulting to latest project: {effective_project_name}")
             else:
                 effective_project_name = "default"
@@ -145,6 +143,15 @@ def register_image_create_tool(mcp: FastMCP) -> None:
                 if page.url != url:
                     page.get(url)
                     time.sleep(4)
+                
+                # If cached URL is invalid, we might be redirected away from the project page
+                if "/project/" not in page.url:
+                    logger.warning(f"Cached URL {url} seems invalid. Forcing sync...")
+                    url = ensure_project_exists(effective_project_name, browser, force_sync=True)
+                    if page.url != url:
+                        page.get(url)
+                        time.sleep(4)
+
                 
                 # Apply settings
                 qty_str = f"x{quantity}"
@@ -267,33 +274,23 @@ def register_image_create_tool(mcp: FastMCP) -> None:
 
                 time.sleep(1)
 
-                # Wait for generate button to become enabled (up to 5s)
-                for _ in range(10):
-                    btns = page.eles('tag:button')
-                    gen_candidates = [b for b in btns if 'generate-icon-button' in (b.attr('class') or '')]
-                    if gen_candidates and not gen_candidates[0].attr('disabled'):
-                        break
-                    time.sleep(0.5)
-                else:
-                    logger.warning("Generate button still disabled after waiting; attempting click anyway")
-
                 # Click generate button
                 gen_btn = None
-                btns = page.eles('tag:button')
-                for b in btns:
-                    cls = b.attr('class') or ''
-                    if 'generate-icon-button' in cls:
-                        gen_btn = b
+                for _ in range(10):
+                    submit_btn = page.ele('xpath://button[@type="submit"]')
+                    if submit_btn and not submit_btn.attr("disabled"):
+                        gen_btn = submit_btn
                         break
-                
+                    time.sleep(0.5)
+
                 if not gen_btn:
                     raise Exception("Generate button not found")
-                    
-                # Click generate button
-                gen_btn.click(by_js=True)
+
+                gen_btn.click()
                 logger.info(f"Background job {job_id}: Clicked generate button.")
+
                 
-                _jobs[job_id] = {
+                _jobs[job_id].update({
                     "job_id": job_id,
                     "status": "generating",
                     "is_finished": False,
@@ -303,7 +300,7 @@ def register_image_create_tool(mcp: FastMCP) -> None:
                     "elapsed_seconds": 0,
                     "message": "已点击生成，等待开始生成...",
                     "next_action": f"任务已提交，等待开始生成，请等待 5 秒后继续调用 image_status(job_id='{job_id}') 检查进度。"
-                }
+                })
 
                 # 1. Wait for loading-percentage element to appear (up to 40s)
                 loading_xpath = 'xpath://div[@class="loading-percentage"]'
@@ -358,7 +355,7 @@ def register_image_create_tool(mcp: FastMCP) -> None:
                     raise Exception(f"图片生成超时（超过 {total_timeout} 秒未完成）")
 
                 # 3. Locate the newest tile and click to enter details
-                time.sleep(2)
+                time.sleep(0.5)
                 tile_xpath = 'xpath://flow-grid-tile-container[1]'
                 tile = page.ele(tile_xpath, timeout=10)
                 if not tile:
@@ -371,7 +368,7 @@ def register_image_create_tool(mcp: FastMCP) -> None:
                     logger.warning(f"Direct click on tile failed: {e}, trying click(by_js=True)")
                     tile.click(by_js=True)
 
-                time.sleep(3)
+                time.sleep(0.5)
 
                 from google_flow_mcp.pages.image_edit_page import ImageEditPage
                 edit_page = ImageEditPage(page)
@@ -409,7 +406,7 @@ def register_image_create_tool(mcp: FastMCP) -> None:
                     if download in ("1K", "2K") and image_local_path:
                         msg += f"，{download} 图片已下载至 {image_local_path}"
 
-                _jobs[job_id] = {
+                _jobs[job_id].update({
                     "job_id": job_id,
                     "status": status,
                     "is_finished": True,
@@ -425,13 +422,13 @@ def register_image_create_tool(mcp: FastMCP) -> None:
                     "base64": b64_data,
                     "image_local_path": image_local_path,
                     "rename_success": rename_success
-                }
+                })
                 logger.info(f"Background job {job_id} completed with status: {status}")
                 
             except Exception as e:
                 total_time = round(time.time() - start_time, 1) if 'start_time' in locals() else 0
                 logger.error(f"Background job {job_id} failed: {str(e)}")
-                _jobs[job_id] = {
+                _jobs[job_id].update({
                     "job_id": job_id,
                     "status": "error",
                     "is_finished": True,
@@ -439,7 +436,7 @@ def register_image_create_tool(mcp: FastMCP) -> None:
                     "message": f"图片生成任务失败: {str(e)}",
                     "elapsed_seconds": total_time,
                     "next_action": "任务执行失败，智能体请停止轮询，可向用户汇报具体失败原因。"
-                }
+                })
 
         task_params = {
             "project_name": effective_project_name,
@@ -458,7 +455,7 @@ def register_image_create_tool(mcp: FastMCP) -> None:
             job_id=job_id,
             initial_state=_jobs[job_id],
             worker_fn=task_worker,
-            project_id=effective_project_name,
+            project_name=effective_project_name,
             task_name=image_name or f"image_{job_id[:8]}",
             params=task_params,
             required_assets=required_assets,

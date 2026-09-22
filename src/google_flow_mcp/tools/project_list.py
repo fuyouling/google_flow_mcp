@@ -22,9 +22,9 @@ def register_project_list_tool(mcp: FastMCP) -> None:
         from google_flow_mcp.config import get_settings
         
         if not force_refresh:
-            cache_data = ProjectCache.load()
-            if cache_data and cache_data.get("projects"):
-                return json.dumps(list(cache_data["projects"].keys()), ensure_ascii=False, indent=2)
+            projects = ProjectCache.get_all_projects()
+            worker_projects = [p["name"] for p in projects]
+            return json.dumps(worker_projects, ensure_ascii=False, indent=2)
                 
         # Force refresh
         from google_flow_mcp.tasks.manager import task_manager
@@ -34,11 +34,12 @@ def register_project_list_tool(mcp: FastMCP) -> None:
             task_type = busy_task.get("task_type", "生成") if busy_task else "生成"
             error_msg = f"当前有后台{task_type}任务正在执行中 (job_id='{job_id}') 占用浏览器，暂无法强制刷新抓取网页。请等待生成完成，或使用 force_refresh=False 读取本地缓存。"
             logger.warning(f"project_list(force_refresh=True) blocked: browser is busy with job {job_id}")
-            cache_data = ProjectCache.load()
-            if cache_data and cache_data.get("projects"):
+            projects = ProjectCache.get_all_projects()
+            if projects:
+                worker_projects = [p["name"] for p in projects]
                 return json.dumps({
                     "warning": error_msg,
-                    "projects": list(cache_data["projects"].keys())
+                    "projects": worker_projects
                 }, ensure_ascii=False, indent=2)
             return json.dumps({"error": error_msg, "busy_job_id": job_id}, ensure_ascii=False)
 

@@ -151,7 +151,7 @@ class FlowCharacterPage(BasePage):
                 logger.warning("Could not find model selection button.")
             
         # 3. Click Generate
-        gen_btn = self.tab.ele('xpath://button[contains(@aria-label, "开始生成") or contains(., "开始生成") or contains(., "Generate") or contains(@class, "generate-icon-button")]', timeout=2)
+        gen_btn = self.tab.ele('xpath://button[@type="submit"]', timeout=2)
         if gen_btn:
             gen_btn.click()
             time.sleep(2)
@@ -272,7 +272,7 @@ class FlowCharacterPage(BasePage):
             else:
                 logger.warning("Could not find model selection button.")
             
-        gen_btn = self.tab.ele('xpath://button[contains(@aria-label, "开始生成") or contains(., "开始生成") or contains(., "Generate") or contains(@class, "generate-icon-button")]', timeout=2)
+        gen_btn = self.tab.ele('xpath://button[@type="submit"]', timeout=2)
         if gen_btn:
             gen_btn.click()
             time.sleep(2)

@@ -7,7 +7,6 @@ from google_flow_mcp.cluster.models import TaskType, TaskResult, TaskStatus
 @pytest.fixture(autouse=True)
 def mock_account_cache(tmp_path, monkeypatch):
     test_file = str(tmp_path / "test_account_cache.json")
-    monkeypatch.setattr("google_flow_mcp.models.account_cache.ACCOUNT_CACHE_FILE", test_file)
 
 
 def test_task_manager_delegation_to_cluster():
@@ -37,7 +36,7 @@ def test_task_manager_delegation_to_cluster():
             job_id="job-test-cluster",
             initial_state=initial_state,
             worker_fn=lambda: None,
-            project_id="test_project_alias",
+            project_name="test_project_alias",
             task_name="my_cluster_video",
             params={"prompt": "ocean waves", "model_name": "Omni 1.1 Flash"},
             required_assets=["ocean_keyframe"],

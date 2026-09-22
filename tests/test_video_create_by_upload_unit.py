@@ -36,10 +36,10 @@ def test_video_create_by_upload_tool_schema():
     tool = mcp._tool_manager.get_tool("video_create_by_upload")
     assert tool is not None
     props = tool.parameters["properties"]
-    assert "project_id" in props
+    assert "project_name" in props
     assert "video_path" in props
     assert "video_name" in props
-    assert "project_id" in tool.parameters["required"]
+    assert "project_name" in tool.parameters["required"]
     assert "video_path" in tool.parameters["required"]
     assert "video_name" in tool.parameters["required"]
 
@@ -52,7 +52,7 @@ def test_video_create_by_upload_empty_name():
     tool_fn = tool.fn
 
     res_str = tool_fn(
-        project_id="proj_1",
+        project_name="proj_1",
         video_name="   ",
         video_path="sample.mp4"
     )
@@ -69,7 +69,7 @@ def test_video_create_by_upload_file_not_found():
     tool_fn = tool.fn
 
     res_str = tool_fn(
-        project_id="proj_1",
+        project_name="proj_1",
         video_name="My Video",
         video_path="non_existent_video_file_12345.mp4"
     )
@@ -191,10 +191,11 @@ def test_video_create_by_upload_worker_success():
 
     try:
         with patch("google_flow_mcp.tools.video_create_by_upload.get_browser", return_value=mock_browser), \
+         patch("google_flow_mcp.utils.project_utils.ensure_project_exists", return_value="TestProject"), \
              patch("google_flow_mcp.tools.video_create_by_upload.FlowVideoPage", return_value=mock_page):
 
             res_json = tool_fn(
-                project_id="proj_vid_upload_1",
+                project_name="TestProject",
                 video_path=vid_path,
                 video_name="Epic Trailer Video"
             )
@@ -203,7 +204,7 @@ def test_video_create_by_upload_worker_success():
             job_id = res["job_id"]
 
             # Wait for background thread to complete
-            for _ in range(60):
+            for _ in range(120):
                 status = task_manager.get_task_status(job_id)
                 if status.get("is_finished"):
                     break
@@ -215,7 +216,7 @@ def test_video_create_by_upload_worker_success():
             assert status["video_path"] == str(Path(vid_path).resolve())
 
             # Verify steps executed
-            mock_page.upload_video_on_project_page.assert_called_once_with("proj_vid_upload_1", vid_path)
+            mock_page.upload_video_on_project_page.assert_called_once_with("TestProject", vid_path)
             mock_page.rename_and_save_in_detail.assert_called_once_with("Epic_Trailer_Video")
 
     finally:

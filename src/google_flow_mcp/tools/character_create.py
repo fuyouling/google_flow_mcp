@@ -1,5 +1,6 @@
 import json
 import uuid
+import time
 from typing import Annotated
 from pydantic import Field
 from loguru import logger
@@ -36,15 +37,11 @@ def register_character_create_tool(mcp: FastMCP) -> None:
         3. 你**必须**使用 `character_status` 工具轮询这个 job_id 来获取最终的生成结果（包含本地下载路径，若 image_base64=True 还包含图片 base64 数据）。
         """
         # 0. Resolve project_name
-        cache = ProjectCache.load()
-        projects = cache.get("projects", {})
-        
         if not project_name or not project_name.strip():
+            projects = ProjectCache.get_all_projects()
             if projects:
-                project_name = max(
-                    projects.keys(),
-                    key=lambda k: projects[k].get("last_accessed", "")
-                )
+                default_proj = max(projects, key=lambda p: p.get("last_accessed", ""))
+                project_name = default_proj["name"]
                 logger.info(f"character_create: project_name not provided, defaulting to latest project: {project_name}")
             else:
                 project_name = "default"
@@ -68,17 +65,26 @@ def register_character_create_tool(mcp: FastMCP) -> None:
                 # Step 1 & 2: Navigate
                 from google_flow_mcp.utils.project_utils import ensure_project_exists
                 project_url = ensure_project_exists(project_name, browser)
+                if page.tab.url != project_url:
+                    page.tab.get(project_url)
+                    time.sleep(4)
+                
+                # If cached URL is invalid, we might be redirected away from the project page
+                if "/project/" not in page.tab.url:
+                    logger.warning(f"Cached URL {project_url} seems invalid. Forcing sync...")
+                    project_url = ensure_project_exists(project_name, browser, force_sync=True)
+                
                 page.navigate_to_characters(project_url)
                 
                 # Step 3: New Character
                 if not page.click_new_character():
-                    task_manager.jobs[job_id] = {
+                    task_manager.jobs[job_id].update({
                         "job_id": job_id,
                         "status": "error",
                         "is_finished": True,
                         "error": "Failed to open character editor.",
                         "message": "Failed to open character editor."
-                    }
+                    })
                     return
                     
                 # Step 4-6: Generate Portrait
@@ -135,7 +141,7 @@ def register_character_create_tool(mcp: FastMCP) -> None:
                         if fullbody_local_path:
                             msg += f" 全身像已下载至: {fullbody_local_path}。"
 
-                task_manager.jobs[job_id] = {
+                task_manager.jobs[job_id].update({
                     "job_id": job_id,
                     "status": status,
                     "is_finished": True,
@@ -145,18 +151,18 @@ def register_character_create_tool(mcp: FastMCP) -> None:
                     "portrait_local_path": portrait_local_path,
                     "fullbody_local_path": fullbody_local_path,
                     "message": msg
-                }
+                })
                 logger.info(f"Background job {job_id} completed successfully with status: {status}")
                 
             except Exception as e:
                 logger.error(f"Background job {job_id} failed: {str(e)}")
-                task_manager.jobs[job_id] = {
+                task_manager.jobs[job_id].update({
                     "job_id": job_id,
                     "status": "error",
                     "is_finished": True,
                     "error": str(e),
                     "message": f"虚拟角色创建失败: {str(e)}"
-                }
+                })
 
         task_params = {
             "project_name": project_name,
@@ -174,7 +180,7 @@ def register_character_create_tool(mcp: FastMCP) -> None:
             job_id=job_id,
             initial_state=initial_state,
             worker_fn=task_worker,
-            project_id=project_name,
+            project_name=project_name,
             task_name=character_name,
             params=task_params,
         )

@@ -21,7 +21,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() in ("gbk", "gb2312", "cp9
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 # ── 测试参数（请根据实际环境调整） ──────────────────────────────────
-PROJECT_ID           = "41ffbc19-48f6-44c0-8b2a-4745e26ddc74"  # 目标项目 ID
+PROJECT_NAME   = "TestProject"  # 目标项目 ID
 IMAGE_NAME           = "Uploaded Test Image"                    # 图片名称（自动转为 Uploaded_Test_Image）
 IMAGE_PATH           = r"C:\Users\zgh\Downloads\google_flow\Test_Hero_Portrait.jpeg"
 MAX_WAIT             = 120  # 上传创建通常很快，最多等待 2 分钟
@@ -55,7 +55,7 @@ async def poll_status(session: ClientSession, job_id: str, max_wait: int = MAX_W
 async def main():
     print("=" * 60)
     print("🚀 测试 image_create_by_upload 工具")
-    print(f"   项目 ID: {PROJECT_ID}")
+    print(f"   项目 ID: {PROJECT_NAME}")
     print(f"   图片名称: {IMAGE_NAME}")
     print(f"   本地图片: {IMAGE_PATH}")
     print("=" * 60)
@@ -81,7 +81,7 @@ async def main():
             # 2. 发起图片上传创建
             print("\n▶️ 发起图片上传创建请求...")
             args = {
-                "project_id": PROJECT_ID,
+                "project_name": PROJECT_NAME,
                 "image_name": IMAGE_NAME,
                 "image_path": IMAGE_PATH
             }

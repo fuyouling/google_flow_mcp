@@ -1,5 +1,6 @@
 import json
 import re
+import time
 import uuid
 from pathlib import Path
 from typing import Annotated
@@ -57,15 +58,11 @@ def register_video_create_by_upload_tool(mcp: FastMCP) -> None:
 
         # 0. Resolve project_name to project_url
         from google_flow_mcp.models.project_cache import ProjectCache
-        cache = ProjectCache.load()
-        projects = cache.get("projects", {})
-        
         if not project_name or not project_name.strip():
+            projects = ProjectCache.get_all_projects()
             if projects:
-                project_name = max(
-                    projects.keys(),
-                    key=lambda k: projects[k].get("last_accessed", "")
-                )
+                default_proj = max(projects, key=lambda p: p.get("last_accessed", ""))
+                project_name = default_proj["name"]
                 logger.info(f"video_create_by_upload: project_name not provided, defaulting to latest project: {project_name}")
             else:
                 return json.dumps({
@@ -100,6 +97,17 @@ def register_video_create_by_upload_tool(mcp: FastMCP) -> None:
                 project_url = ensure_project_exists(project_name, browser)
                 
                 page = FlowVideoPage(browser.latest_tab)
+                if page.url != project_url:
+                    page.get(project_url)
+                    time.sleep(4)
+                
+                # If cached URL is invalid, we might be redirected away from the project page
+                if "/project/" not in page.url:
+                    logger.warning(f"Cached URL {project_url} seems invalid. Forcing sync...")
+                    project_url = ensure_project_exists(project_name, browser, force_sync=True)
+                    if page.url != project_url:
+                        page.get(project_url)
+                        time.sleep(4)
 
                 # Step 1 ~ 3: Upload video from project home page and navigate to details
                 page.upload_video_on_project_page(project_url, video_path)
@@ -108,25 +116,25 @@ def register_video_create_by_upload_tool(mcp: FastMCP) -> None:
                 page.rename_and_save_in_detail(video_name)
 
                 msg = f"视频 {video_name} 上传创建并保存成功。"
-                task_manager.jobs[job_id] = {
+                task_manager.jobs[job_id].update({
                     "job_id": job_id,
                     "status": "completed",
                     "is_finished": True,
                     "video_name": video_name,
                     "video_path": str(p_path.resolve()),
                     "message": msg
-                }
+                })
                 logger.info(f"Background video upload job {job_id} completed successfully for {video_name}")
 
             except Exception as e:
                 logger.error(f"Background video upload job {job_id} failed: {str(e)}")
-                task_manager.jobs[job_id] = {
+                task_manager.jobs[job_id].update({
                     "job_id": job_id,
                     "status": "error",
                     "is_finished": True,
                     "error": str(e),
                     "message": f"视频上传创建失败: {str(e)}"
-                }
+                })
 
         task_params = {
             "project_name": project_name,
@@ -138,7 +146,7 @@ def register_video_create_by_upload_tool(mcp: FastMCP) -> None:
             job_id=job_id,
             initial_state=initial_state,
             worker_fn=task_worker,
-            project_id=project_name,
+            project_name=project_name,
             task_name=f"upload_{formatted_name}",
             params=task_params,
         )
