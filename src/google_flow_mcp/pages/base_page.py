@@ -15,8 +15,19 @@ class BasePage:
     def navigate(self, url: str) -> None:
         """Navigate to a specified URL."""
         logger.info(f"Navigating to URL: {url}")
+        
         try:
-            self.tab.get(url)
+            if hasattr(self.tab, "set") and hasattr(self.tab.set, "load_mode"):
+                self.tab.set.load_mode.eager()
+        except Exception as e:
+            logger.debug(f"Could not set eager load mode: {e}")
+            
+        try:
+            # Pass show_errmsg=True so DrissionPage raises exceptions on failure instead of silently returning False
+            success = self.tab.get(url, show_errmsg=True, retry=2)
+            if success is False:
+                logger.error(f"DrissionPage tab.get returned False for {url}")
+                raise PageTimeoutError(f"Navigation to {url} failed or timed out")
         except Exception as e:
             logger.error(f"Failed navigating to {url}: {e}")
             raise PageTimeoutError(f"Navigation to {url} failed: {e}") from e

@@ -24,6 +24,13 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+if sys.stdout.encoding.lower() != 'utf-8':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+
 # 确保项目根目录与 src 目录在 sys.path 中
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 SRC_DIR = PROJECT_ROOT / "src"
