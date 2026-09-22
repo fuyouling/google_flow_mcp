@@ -58,3 +58,4 @@ docs/
 *.db-shm
 
 *.log
+*.pid
