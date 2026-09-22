@@ -4,7 +4,7 @@ from DrissionPage import ChromiumOptions, Chromium
 from loguru import logger
 
 from google_flow_mcp.browser.exceptions import BrowserInitError
-from google_flow_mcp.browser.launcher import load_browser_flags
+from google_flow_mcp.browser.launcher import load_browser_flags, get_browser_port
 from google_flow_mcp.config import get_settings
 
 _page: Chromium | None = None
@@ -23,7 +23,8 @@ def _configure_logging(log_level: str = "INFO") -> None:
 def _build_options(settings) -> ChromiumOptions:
     """Build ChromiumOptions from settings and YAML configuration."""
     options = ChromiumOptions()
-    options.set_local_port(9222)
+    port = get_browser_port()
+    options.set_local_port(port)
 
     # User data directory (normalized in config.py)
     if settings.chrome_user_data_dir:
@@ -104,13 +105,14 @@ def get_browser() -> Chromium:
                 
                 is_connect_error = type(e).__name__ == "BrowserConnectError"
                 
-                if attempt == 0 and is_connect_error:
-                    logger.warning("BrowserConnectError detected. Attempting to clean up zombie processes and locks on port 9222 before retry...")
+                if "BrowserConnectError" in str(e):
+                    port = get_browser_port()
+                    logger.warning(f"BrowserConnectError detected. Attempting to clean up zombie processes and locks on port {port} before retry...")
                     try:
                         from google_flow_mcp.browser.utils import stop_browser
-                        stop_browser(9222)
+                        stop_browser(port)
                     except Exception as e_clean:
-                        logger.warning(f"Failed to clean port 9222: {e_clean}")
+                        logger.warning(f"Failed to clean port {port}: {e_clean}")
                         
                     if settings.chrome_user_data_dir:
                         lock_file = os.path.join(settings.chrome_user_data_dir, "SingletonLock")

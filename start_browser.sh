@@ -3,15 +3,15 @@
 # Google Flow MCP 独立浏览器常驻启动与管理脚本 (Linux / macOS / WSL / Git Bash)
 #
 # 功能:
-#   复用项目现有配置 (.env 与 browser_config.yaml)，在 9222 端口常驻启动 Chromium 浏览器。
-#   启动后智能体对话和 MCP 工具调用将直接复用本窗口，无需反复启闭浏览器。
+#   复用项目现有配置 (.env 与 browser_config.yaml)，在配置指定的端口（默认 9222）常驻启动 Chromium 浏览器。
+#   启动后后续智能体对话或 MCP 工具调用时将直接连接此窗口，无需反复启动浏览器。
 #
-# 使用方式:
-#   ./start_browser.sh               # 默认启动常驻服务（前台保持监控，输入 r 刷新，输入 q 退出）
-#   ./start_browser.sh --status      # 检查当前 9222 端口浏览器及 CDP 运行状态与活动标签页
-#   ./start_browser.sh --force       # 强制重启（先清理占用 9222 端口的残留进程再启动）
-#   ./start_browser.sh --stop        # 安全关闭 9222 端口运行的浏览器
-#   ./start_browser.sh --detach      # 后台模式（启动并完成检测后退出终端，浏览器保持后台运行）
+# 用法：
+#   ./start_browser.sh               # 默认启动常驻服务（前台保持，按 q 退出，按 r 刷新）
+#   ./start_browser.sh --status      # 检查当前配置端口浏览器及 CDP 运行状态与活动标签页
+#   ./start_browser.sh --force       # 强制重启（先清理占用该端口的残留进程再启动）
+#   ./start_browser.sh --stop        # 安全关闭运行在配置端口的浏览器
+#   ./start_browser.sh --detach      # 后台模式启动（检测并启动后立即退出当前终端，浏览器保持后台常驻）
 #   ./start_browser.sh --url <URL>   # 启动并打开指定的网页地址
 #
 # 控制台快捷操作:

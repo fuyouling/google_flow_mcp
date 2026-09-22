@@ -474,15 +474,17 @@ def main():
     parser.add_argument("--grpc-target", default=default_grpc_target, help=f"Master gRPC target (default: {default_grpc_target})")
     parser.add_argument("--id", default=default_id, help=f"Unique Worker ID (default: {default_id})")
     parser.add_argument("--account", default=default_account, help=f"Google Account identifier (default: '{default_account}')")
-    parser.add_argument("--auto-browser", action="store_true", help="Auto start browser on port 9222 if not running")
+    parser.add_argument("--auto-browser", action="store_true", help="Auto start browser on configured port (default 9222) if not running")
     args = parser.parse_args()
 
     if args.auto_browser:
         try:
             from google_flow_mcp.browser.start_browser import is_port_in_use, launch_browser
-            if not is_port_in_use(9222):
-                logger.info("Auto-launching Chromium browser on port 9222...")
-                launch_browser(detach=True, port=9222)
+            from google_flow_mcp.browser.launcher import get_browser_port
+            port = get_browser_port()
+            if not is_port_in_use(port):
+                logger.info(f"Auto-launching Chromium browser on port {port}...")
+                launch_browser(detach=True, port=port)
                 time.sleep(2)
         except Exception as e:
             logger.warning(f"Failed to auto-launch browser: {e}")

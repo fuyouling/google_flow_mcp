@@ -60,8 +60,14 @@ def normalize_master_url(raw_url: str, default_port: int = 8765) -> str:
     return url.rstrip("/")
 
 
-def ensure_browser_running(port: int = 9222, force: bool = False) -> bool:
-    """检查并在需要时后台启动 Chrome 浏览器。"""
+def ensure_browser_running(port: int | None = None, force: bool = False) -> bool:
+    """Ensure the local browser is running.
+    
+    If port is None, it reads the configured port from browser_config.yaml (defaults to 9222).
+    """
+    if port is None:
+        from google_flow_mcp.browser.launcher import get_browser_port
+        port = get_browser_port()
     from google_flow_mcp.browser.start_browser import get_cdp_version, is_port_in_use, launch_browser
 
     if not force and is_port_in_use(port):
@@ -111,7 +117,7 @@ def cmd_master(args: argparse.Namespace) -> None:
     print("=" * 76)
 
     if not args.no_browser:
-        ensure_browser_running(port=9222, force=args.force_browser)
+        ensure_browser_running(port=None, force=args.force_browser)
 
     if args.hub_only:
         # 仅启动集群 Hub 服务，不作为 stdio MCP 运行
@@ -217,7 +223,7 @@ def cmd_worker(args: argparse.Namespace) -> None:
 
     # 检查并启动本地浏览器
     if not args.no_browser:
-        ensure_browser_running(port=9222, force=args.force_browser)
+        ensure_browser_running(port=None, force=args.force_browser)
 
     from google_flow_mcp.cluster.worker_client import WorkerClient
 
@@ -331,7 +337,7 @@ def main() -> None:
     p_master.add_argument("--hub-only", action="store_true", help="仅启动 HTTP/WS 集群中枢，不运行 stdio MCP")
     p_master.add_argument("--no-local-worker", action="store_true", help="主节点不启动本机 Worker 0")
     p_master.add_argument("--no-browser", action="store_true", help="不自动检测或启动本机 Chrome")
-    p_master.add_argument("--force-browser", action="store_true", help="强制重启本地 9222 端口 Chrome")
+    p_master.add_argument("--force-browser", action="store_true", help="强制重启本地 Chrome")
 
     # worker
     p_worker = subparsers.add_parser("worker", help="启动 Worker 集群从机节点")
@@ -340,7 +346,7 @@ def main() -> None:
     p_worker.add_argument("--id", default=None, help="从机节点唯一标识 (默认 worker_<主机名>)")
     p_worker.add_argument("--account", "-a", default=None, help="该从机登录的 Google Flow 账号标识")
     p_worker.add_argument("--no-browser", action="store_true", help="不自动检测或启动本机 Chrome")
-    p_worker.add_argument("--force-browser", action="store_true", help="强制重启本地 9222 端口 Chrome")
+    p_worker.add_argument("--force-browser", action="store_true", help="强制重启本地 Chrome")
 
     # status
     p_status = subparsers.add_parser("status", help="查看集群实时监控状态")

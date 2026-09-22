@@ -5,11 +5,14 @@
 避免反复拉起或关闭浏览器窗口。
 
 使用方式:
-    python -m google_flow_mcp.browser.start_browser              # 启动并常驻前台（推荐：显示状态，按 q 退出，按 r 刷新）
-    python -m google_flow_mcp.browser.start_browser --detach     # 启动/接管后直接退出终端交互（后台模式）
-    python -m google_flow_mcp.browser.start_browser --status     # 查看当前 9222 端口浏览器的运行状态
-    python -m google_flow_mcp.browser.start_browser --stop       # 关闭运行在 9222 端口的浏览器
-    python -m google_flow_mcp.browser.start_browser --force      # 强制重启（先杀死占用 9222 端口的残留进程）
+    python -m google_flow_mcp.browser.start_browser              # 启动后监听指定的远程调试端口 (CDP)（由 browser_config.yaml 配置，默认 9222），后续智能体对话或 MCP 工具调用时将直接连接此窗口，
+无需反复启动。
+
+支持的命令示例：
+    python -m google_flow_mcp.browser.start_browser              # 默认以带界面模式启动并常驻
+    python -m google_flow_mcp.browser.start_browser --status     # 查看当前浏览器的运行状态
+    python -m google_flow_mcp.browser.start_browser --stop       # 关闭运行中的浏览器
+    python -m google_flow_mcp.browser.start_browser --force      # 强制重启（先杀死占用端口的残留进程）
     python -m google_flow_mcp.browser.start_browser --url <URL>  # 启动后打开指定的 URL
 """
 
@@ -50,7 +53,10 @@ from google_flow_mcp.browser.utils import is_port_in_use, get_process_by_port, s
 
 
 
-def get_cdp_version(port: int = 9222, timeout: float = 2.0) -> Optional[Dict[str, Any]]:
+def get_cdp_version(port: int | None = None, timeout: float = 2.0) -> Optional[Dict[str, Any]]:
+    if port is None:
+        from google_flow_mcp.browser.launcher import get_browser_port
+        port = get_browser_port()
     """向 CDP HTTP 调试端口发送探测请求获取浏览器版本信息。"""
     url = f"http://127.0.0.1:{port}/json/version"
     try:
@@ -63,7 +69,10 @@ def get_cdp_version(port: int = 9222, timeout: float = 2.0) -> Optional[Dict[str
     return None
 
 
-def get_cdp_tabs(port: int = 9222, timeout: float = 2.0) -> List[Dict[str, Any]]:
+def get_cdp_tabs(port: int | None = None, timeout: float = 2.0) -> List[Dict[str, Any]]:
+    if port is None:
+        from google_flow_mcp.browser.launcher import get_browser_port
+        port = get_browser_port()
     """获取 CDP 调试端口上所有打开的标签页列表。"""
     url = f"http://127.0.0.1:{port}/json"
     try:
@@ -77,7 +86,10 @@ def get_cdp_tabs(port: int = 9222, timeout: float = 2.0) -> List[Dict[str, Any]]
 
 
 
-def check_status(port: int = 9222) -> None:
+def check_status(port: int | None = None) -> None:
+    if port is None:
+        from google_flow_mcp.browser.launcher import get_browser_port
+        port = get_browser_port()
     """检查并打印浏览器当前运行状态。"""
     in_use = is_port_in_use(port)
     print("=" * 64)
@@ -144,9 +156,12 @@ def launch_browser(
     target_url: Optional[str] = None,
     force: bool = False,
     detach: bool = False,
-    port: int = 9222,
+    port: int | None = None,
 ) -> None:
     """复用项目配置启动或接管浏览器并保持常驻。"""
+    if port is None:
+        from google_flow_mcp.browser.launcher import get_browser_port
+        port = get_browser_port()
     settings = get_settings()
     url = target_url or settings.google_flow_base_url
 
@@ -299,18 +314,18 @@ def main() -> None:
     parser.add_argument(
         "--status",
         action="store_true",
-        help="仅检查当前 9222 端口浏览器的运行状态",
+        help="仅检查当前端口浏览器的运行状态",
     )
     parser.add_argument(
         "--stop",
         action="store_true",
-        help="关闭运行在 9222 端口的浏览器进程",
+        help="关闭运行的浏览器进程",
     )
     parser.add_argument(
         "-f",
         "--force",
         action="store_true",
-        help="强制重启：先结束占用 9222 端口的进程，再重新启动浏览器",
+        help="强制重启：先结束占用调试端口的进程，再重新启动浏览器",
     )
     parser.add_argument(
         "-d",
@@ -321,8 +336,8 @@ def main() -> None:
     parser.add_argument(
         "--port",
         type=int,
-        default=9222,
-        help="CDP 远程调试端口 (默认 9222)",
+        default=None,
+        help="CDP 远程调试端口 (默认从 browser_config.yaml 读取)",
     )
 
     args = parser.parse_args()

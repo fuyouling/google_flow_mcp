@@ -31,8 +31,11 @@ def get_process_by_port(port: int) -> Optional[psutil.Process]:
     return None
 
 
-def stop_browser(port: int = 9222) -> bool:
+def stop_browser(port: int | None = None) -> bool:
     """关闭监听指定端口的浏览器进程树。"""
+    if port is None:
+        from google_flow_mcp.browser.launcher import get_browser_port
+        port = get_browser_port()
     proc = get_process_by_port(port)
     if not proc:
         logger.info(f"端口 {port} 未被占用，没有正在运行的浏览器。")
