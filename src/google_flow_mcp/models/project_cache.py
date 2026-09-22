@@ -40,8 +40,8 @@ class ProjectCache:
         return d
 
     @classmethod
-    def get_project_by_name(cls, name: str) -> Optional[dict]:
-        worker_id = get_settings().worker_id
+    def get_project_by_name(cls, name: str, worker_id: str = None) -> Optional[dict]:
+        worker_id = worker_id or get_settings().worker_id
         
         with get_connection() as conn:
             cursor = conn.cursor()
@@ -62,8 +62,8 @@ class ProjectCache:
         return None
 
     @classmethod
-    def get_all_projects(cls) -> list[dict]:
-        worker_id = get_settings().worker_id
+    def get_all_projects(cls, worker_id: str = None) -> list[dict]:
+        worker_id = worker_id or get_settings().worker_id
         
         with get_connection() as conn:
             cursor = conn.cursor()
@@ -82,8 +82,8 @@ class ProjectCache:
             return [cls._build_project_dict(row) for row in rows]
 
     @classmethod
-    def delete_project_for_worker(cls, project_name: str) -> None:
-        worker_id = get_settings().worker_id
+    def delete_project_for_worker(cls, project_name: str, worker_id: str = None) -> None:
+        worker_id = worker_id or get_settings().worker_id
         
         with get_connection() as conn:
             cursor = conn.cursor()
@@ -110,8 +110,8 @@ class ProjectCache:
             conn.commit()
 
     @classmethod
-    def rename_project_for_worker(cls, old_name: str, new_name: str) -> None:
-        worker_id = get_settings().worker_id
+    def rename_project_for_worker(cls, old_name: str, new_name: str, worker_id: str = None) -> None:
+        worker_id = worker_id or get_settings().worker_id
         
         with get_connection() as conn:
             cursor = conn.cursor()
@@ -179,8 +179,8 @@ class ProjectCache:
             conn.commit()
 
     @classmethod
-    def update_project(cls, project_name: str, url: str = None) -> None:
-        worker_id = get_settings().worker_id
+    def update_project(cls, project_name: str, url: str = None, local_uuid: str = None, worker_id: str = None) -> None:
+        worker_id = worker_id or get_settings().worker_id
         
         with get_connection() as conn:
             cursor = conn.cursor()
@@ -195,7 +195,6 @@ class ProjectCache:
                 ON CONFLICT(name) DO UPDATE SET last_accessed = excluded.last_accessed
             """, (project_name, now))
             
-            local_uuid = None
             if url:
                 try:
                     if "/project/" in url:
@@ -204,13 +203,13 @@ class ProjectCache:
                     pass
             
             # Upsert worker
-            if url:
+            if url or local_uuid:
                 cursor.execute("""
                     INSERT INTO project_workers (project_name, worker_id, url, local_uuid)
                     VALUES (?, ?, ?, ?)
                     ON CONFLICT(project_name, worker_id) DO UPDATE SET 
-                        url = excluded.url,
-                        local_uuid = excluded.local_uuid
+                        url = COALESCE(excluded.url, url),
+                        local_uuid = COALESCE(excluded.local_uuid, local_uuid)
                 """, (project_name, worker_id, url, local_uuid))
             else:
                 cursor.execute("""
@@ -221,8 +220,8 @@ class ProjectCache:
             conn.commit()
 
     @classmethod
-    def update_project_characters(cls, project_name: str, characters: list) -> None:
-        worker_id = get_settings().worker_id
+    def update_project_characters(cls, project_name: str, characters: list, worker_id: str = None) -> None:
+        worker_id = worker_id or get_settings().worker_id
         
         with get_connection() as conn:
             cursor = conn.cursor()
@@ -247,15 +246,15 @@ class ProjectCache:
             conn.commit()
 
     @classmethod
-    def get_project_characters(cls, project_name: str) -> Optional[list]:
-        proj = cls.get_project_by_name(project_name)
+    def get_project_characters(cls, project_name: str, worker_id: str = None) -> Optional[list]:
+        proj = cls.get_project_by_name(project_name, worker_id)
         if proj and "characters" in proj:
             return proj.get("characters")
         return None
 
     @classmethod
-    def update_project_images(cls, project_name: str, images: list) -> None:
-        worker_id = get_settings().worker_id
+    def update_project_images(cls, project_name: str, images: list, worker_id: str = None) -> None:
+        worker_id = worker_id or get_settings().worker_id
         
         with get_connection() as conn:
             cursor = conn.cursor()
@@ -279,15 +278,15 @@ class ProjectCache:
             conn.commit()
 
     @classmethod
-    def get_project_images(cls, project_name: str) -> Optional[list]:
-        proj = cls.get_project_by_name(project_name)
+    def get_project_images(cls, project_name: str, worker_id: str = None) -> Optional[list]:
+        proj = cls.get_project_by_name(project_name, worker_id)
         if proj and "images" in proj:
             return proj.get("images")
         return None
 
     @classmethod
-    def update_project_videos(cls, project_name: str, videos: list) -> None:
-        worker_id = get_settings().worker_id
+    def update_project_videos(cls, project_name: str, videos: list, worker_id: str = None) -> None:
+        worker_id = worker_id or get_settings().worker_id
         
         with get_connection() as conn:
             cursor = conn.cursor()
@@ -311,8 +310,8 @@ class ProjectCache:
             conn.commit()
 
     @classmethod
-    def get_project_videos(cls, project_name: str) -> Optional[list]:
-        proj = cls.get_project_by_name(project_name)
+    def get_project_videos(cls, project_name: str, worker_id: str = None) -> Optional[list]:
+        proj = cls.get_project_by_name(project_name, worker_id)
         if proj and "videos" in proj:
             return proj.get("videos")
         return None

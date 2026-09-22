@@ -14,6 +14,7 @@ from google_flow_mcp.cluster.models import (
 )
 from google_flow_mcp.models.account_cache import AccountCache
 from google_flow_mcp.models.credit_calculator import calc_task_credits
+from google_flow_mcp.models.project_cache import ProjectCache
 
 
 class ClusterScheduler:
@@ -96,6 +97,15 @@ class ClusterScheduler:
             self.workers[worker_id] = info
             if sender:
                 self._worker_senders[worker_id] = sender
+            
+            # --- DB Persistence ---
+            if account:
+                AccountCache.update(email=account, credits=init_credits, worker_id=worker_id)
+            if project_mappings:
+                for proj_alias, local_uuid in project_mappings.items():
+                    ProjectCache.update_project(project_name=proj_alias, local_uuid=local_uuid, worker_id=worker_id)
+            # ----------------------
+            
             logger.info(
                 f"Worker registered: {worker_id} (IP: {ip}, Account: {account}, "
                 f"DailyFree: {init_daily_free}, Balance: {init_credits})"
@@ -142,6 +152,7 @@ class ClusterScheduler:
             worker = self.workers.get(worker_id)
             if worker:
                 worker.project_mappings[project_alias] = local_uuid
+                ProjectCache.update_project(project_name=project_alias, local_uuid=local_uuid, worker_id=worker_id)
                 logger.info(f"Updated project mapping for {worker_id}: {project_alias} -> {local_uuid}")
 
     def add_worker_cached_asset(self, worker_id: str, asset_name: str) -> None:
