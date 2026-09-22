@@ -101,9 +101,6 @@ def get_browser() -> Chromium:
             except Exception as e:
                 import traceback
                 import os
-                import subprocess
-                
-                is_connect_error = type(e).__name__ == "BrowserConnectError"
                 
                 if "BrowserConnectError" in str(e):
                     port = get_browser_port()

@@ -9,21 +9,19 @@ class FlowImagePage(BasePage):
     Page Object Model for Image management in Google Flow.
     """
 
-    def list_images(self, project_id: str = "") -> list:
+    def list_images(self, project_url: str = "") -> list:
         """
         List all images in the current or specified project.
-        - If project_id is provided, navigates to the project if not already there.
+        - If project_url is provided, navigates to the project if not already there.
         - Locates sidebar button: //mat-list-item//span[text()="图片"]
         - If button does not exist, returns empty list (indicating no images).
         - If button exists, clicks it to enter images view and extracts all //flow-image-tile.
-        - Image name extracted from: //flow-image-tile//flow-tile-hover-footer/div/span
         """
-        logger.info(f"Listing images (project_id='{project_id}')...")
-        if project_id:
+        logger.info(f"Listing images (project_url='{project_url}')...")
+        if project_url:
             current_url = self.tab.url or ""
-            if f"/project/{project_id}" not in current_url:
-                project_url = f"https://flow.google.com/project/{project_id}"
-                logger.info(f"Navigating to project {project_id} ({project_url})...")
+            if project_url not in current_url:
+                logger.info(f"Navigating to project url ({project_url})...")
                 self.tab.get(project_url)
                 time.sleep(3)
 
@@ -86,10 +84,10 @@ class FlowImagePage(BasePage):
         logger.info(f"Found {len(images)} images in project.")
         return images
 
-    def upload_image_on_project_page(self, project_id: str, image_path: str, timeout: int = 45) -> bool:
+    def upload_image_on_project_page(self, project_url: str, image_path: str, timeout: int = 45) -> bool:
         """
         Upload an image file from the project home page:
-        1. Navigate to project page: https://flow.google.com/project/{project_id}
+        1. Navigate to project page: {project_url}
         2. Click button: //button[@mattooltip="添加媒体"]
         3. Set file upload via CDP interception: self.tab.set.upload_files(abs_path)
         4. Click button: //span[text()="上传"]
@@ -106,12 +104,9 @@ class FlowImagePage(BasePage):
         file_name = path_obj.name
 
         # 1. Navigate to project
-        current_url = self.tab.url or ""
-        if f"/project/{project_id}" not in current_url:
-            project_url = f"https://flow.google.com/project/{project_id}"
-            logger.info(f"Navigating to project {project_id} ({project_url})...")
-            self.tab.get(project_url)
-            time.sleep(3)
+        logger.info(f"Navigating to project page at {project_url}...")
+        self.tab.get(project_url)
+        time.sleep(3)
 
         # 2. Click '添加媒体' button
         logger.info("Locating '添加媒体' button (//button[@mattooltip='添加媒体'])...")

@@ -19,10 +19,12 @@ def register_project_list_tool(mcp: FastMCP) -> None:
         
         logger.info(f"Executing project_list (force_refresh={force_refresh})")
         
+        from google_flow_mcp.config import get_settings
+        
         if not force_refresh:
             cache_data = ProjectCache.load()
             if cache_data and cache_data.get("projects"):
-                return json.dumps(cache_data["projects"], ensure_ascii=False, indent=2)
+                return json.dumps(list(cache_data["projects"].keys()), ensure_ascii=False, indent=2)
                 
         # Force refresh
         from google_flow_mcp.tasks.manager import task_manager
@@ -36,7 +38,7 @@ def register_project_list_tool(mcp: FastMCP) -> None:
             if cache_data and cache_data.get("projects"):
                 return json.dumps({
                     "warning": error_msg,
-                    "projects": cache_data["projects"]
+                    "projects": list(cache_data["projects"].keys())
                 }, ensure_ascii=False, indent=2)
             return json.dumps({"error": error_msg, "busy_job_id": job_id}, ensure_ascii=False)
 
@@ -45,7 +47,12 @@ def register_project_list_tool(mcp: FastMCP) -> None:
             page = FlowHomePage(browser.latest_tab)
             page.open()
             projects = page.get_projects()
-            return json.dumps(projects, ensure_ascii=False, indent=2)
+            
+            # Synchronize to ProjectCache
+            for title, data in projects.items():
+                ProjectCache.update_project(title, data["url"])
+            
+            return json.dumps(list(projects.keys()), ensure_ascii=False, indent=2)
         except Exception as e:
             logger.error(f"project_list failed: {str(e)}")
             return json.dumps({"error": str(e)}, ensure_ascii=False)

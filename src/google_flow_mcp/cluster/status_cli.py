@@ -46,7 +46,7 @@ def fetch_cluster_status(master_url: str, timeout: float = 3.0) -> Optional[Dict
             if resp.status == 200:
                 data = resp.read().decode("utf-8")
                 return json.loads(data)
-    except urllib.error.URLError as e:
+    except urllib.error.URLError:
         return None
     except Exception:
         return None
@@ -103,7 +103,7 @@ def format_status_table(master_url: str, data: Dict[str, Any]) -> str:
             if cached_count > 0 and isinstance(cached, list):
                 preview = ", ".join(cached[:2])
                 if cached_count > 2:
-                    preview += f" 等"
+                    preview += " 等"
                 cached_info = f"{cached_count} ({preview})"
 
             lines.append(

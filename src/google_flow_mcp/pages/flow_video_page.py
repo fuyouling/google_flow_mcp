@@ -9,21 +9,20 @@ class FlowVideoPage(BasePage):
     Page Object Model for Video management in Google Flow.
     """
 
-    def list_videos(self, project_id: str = "") -> list:
+    def list_videos(self, project_url: str = "") -> list:
         """
         List all videos in the current or specified project.
-        - If project_id is provided, navigates to the project if not already there.
+        - If project_url is provided, navigates to the project if not already there.
         - Locates sidebar button: //mat-list-item//span[text()="视频"]
         - If button does not exist, returns empty list (indicating no videos).
         - If button exists, clicks it to enter videos view and extracts all //flow-video-tile.
         - Video name extracted from: //flow-video-tile//flow-tile-hover-footer/div/span
         """
-        logger.info(f"Listing videos (project_id='{project_id}')...")
-        if project_id:
+        logger.info(f"Listing videos (project_url='{project_url}')...")
+        if project_url:
             current_url = self.tab.url or ""
-            if f"/project/{project_id}" not in current_url:
-                project_url = f"https://flow.google.com/project/{project_id}"
-                logger.info(f"Navigating to project {project_id} ({project_url})...")
+            if project_url not in current_url:
+                logger.info(f"Navigating to project url ({project_url})...")
                 self.tab.get(project_url)
                 time.sleep(3)
 
@@ -89,10 +88,10 @@ class FlowVideoPage(BasePage):
         logger.info(f"Found {len(videos)} videos in project.")
         return videos
 
-    def upload_video_on_project_page(self, project_id: str, video_path: str, timeout: int = 60) -> bool:
+    def upload_video_on_project_page(self, project_url: str, video_path: str, timeout: int = 60) -> bool:
         """
         Upload a video file from the project home page:
-        1. Navigate to project page: https://flow.google.com/project/{project_id}
+        1. Navigate to project page: {project_url}
         2. Click button: //button[@mattooltip="添加媒体"]
         3. Set file upload via CDP interception: self.tab.set.upload_files(abs_path)
         4. Click button: //span[text()="上传"]
@@ -110,9 +109,8 @@ class FlowVideoPage(BasePage):
 
         # 1. Navigate to project
         current_url = self.tab.url or ""
-        if f"/project/{project_id}" not in current_url:
-            project_url = f"https://flow.google.com/project/{project_id}"
-            logger.info(f"Navigating to project {project_id} ({project_url})...")
+        if project_url not in current_url:
+            logger.info(f"Navigating to project url ({project_url})...")
             self.tab.get(project_url)
             time.sleep(3)
 

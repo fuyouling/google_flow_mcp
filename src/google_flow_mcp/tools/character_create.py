@@ -1,5 +1,4 @@
 import json
-import threading
 import uuid
 from typing import Annotated
 from pydantic import Field
@@ -20,7 +19,7 @@ def register_character_create_tool(mcp: FastMCP) -> None:
     def character_create(
         character_name: Annotated[str, Field(description="要创建的虚拟角色名称")],
         portrait_prompt: Annotated[str, Field(description="生成角色头像（肖像）的提示词。你必须严格使用全英文并且遵守以下模板且为了保持头像与全身像的同一性服装的描述必须一致，仅替换中括号里的主体描述：'Medium studio shot of a [主体外貌、穿着特征描述]. perfectly centered, forward-facing. Captured with a Hasselblad H6D-100c and a 50mm lens. The skin is rendered with biological realism, featuring natural textures. Clamshell lighting with a bottom silver reflector creates a luminous glow. The composition is a head and shoulders shot with clear headroom, ensuring the character's full head is entirely within the frame and not cropped by the top border against a seamless, solid white background.'")],
-        project_id: Annotated[str, Field(description="Google Flow 项目的唯一 ID 或名称，留空则自动选用最近访问的项目")] = "",
+        project_name: Annotated[str, Field(description="Google Flow 项目的名称，留空则自动选用最近访问的项目")] = "",
         fullbody_prompt: Annotated[str, Field(description="生成角色全身像的提示词，留空则不生成且为了保持头像与全身像的同一性服装的描述必须一致。如果需要生成，必须严格使用全英文并且遵守以下模板，仅替换中括号里的主体描述（描述需与头像主体一致）：'Full-body character design sheet, featuring a triptych of three different angles: front view, three-quarter view, and back view. High resolution, flat studio lighting, consistent body proportions across all views, solid white background. [主体外貌、穿着特征描述]'")] = "",
         voice_name: Annotated[str, Field(description="角色的声音名称，例如 'Journey' 等，留空则不设置")] = "",
         voice_style: Annotated[str, Field(description="角色的声音风格，留空则不设置")] = "",
@@ -36,17 +35,19 @@ def register_character_create_tool(mcp: FastMCP) -> None:
         2. 若当前已有生成任务进行中，该任务将自动进入全局排队队列。
         3. 你**必须**使用 `character_status` 工具轮询这个 job_id 来获取最终的生成结果（包含本地下载路径，若 image_base64=True 还包含图片 base64 数据）。
         """
-        # 0. Resolve empty project_id to the most recently accessed project
-        if not project_id or not project_id.strip():
-            local_projs = ProjectCache.load().get("projects", {})
-            if local_projs:
-                project_id = max(
-                    local_projs.keys(),
-                    key=lambda k: local_projs[k].get("last_accessed", "")
+        # 0. Resolve project_name
+        cache = ProjectCache.load()
+        projects = cache.get("projects", {})
+        
+        if not project_name or not project_name.strip():
+            if projects:
+                project_name = max(
+                    projects.keys(),
+                    key=lambda k: projects[k].get("last_accessed", "")
                 )
-                logger.info(f"character_create: project_id not provided, defaulting to latest project: {project_id}")
+                logger.info(f"character_create: project_name not provided, defaulting to latest project: {project_name}")
             else:
-                project_id = "default"
+                project_name = "default"
 
         job_id = str(uuid.uuid4())
         initial_state = {
@@ -57,7 +58,7 @@ def register_character_create_tool(mcp: FastMCP) -> None:
             "message": "Character creation started in the background."
         }
         
-        logger.info(f"Submitting character_create task {job_id}: project={project_id}, name={character_name}, download={download}, image_base64={image_base64}")
+        logger.info(f"Submitting character_create task {job_id}: project={project_name}, name={character_name}, download={download}, image_base64={image_base64}")
         
         def task_worker():
             try:
@@ -65,7 +66,9 @@ def register_character_create_tool(mcp: FastMCP) -> None:
                 page = FlowCharacterPage(browser.latest_tab)
                 
                 # Step 1 & 2: Navigate
-                page.navigate_to_characters(project_id)
+                from google_flow_mcp.utils.project_utils import ensure_project_exists
+                project_url = ensure_project_exists(project_name, browser)
+                page.navigate_to_characters(project_url)
                 
                 # Step 3: New Character
                 if not page.click_new_character():
@@ -156,7 +159,7 @@ def register_character_create_tool(mcp: FastMCP) -> None:
                 }
 
         task_params = {
-            "project_id": project_id,
+            "project_name": project_name,
             "character_name": character_name,
             "portrait_prompt": portrait_prompt,
             "fullbody_prompt": fullbody_prompt,
@@ -171,7 +174,7 @@ def register_character_create_tool(mcp: FastMCP) -> None:
             job_id=job_id,
             initial_state=initial_state,
             worker_fn=task_worker,
-            project_id=project_id,
+            project_id=project_name,
             task_name=character_name,
             params=task_params,
         )

@@ -1,5 +1,4 @@
 import json
-import threading
 import uuid
 import time
 from typing import Annotated
@@ -78,7 +77,7 @@ def register_image_create_tool(mcp: FastMCP) -> None:
     @mcp.tool()
     def image_create(
         prompt: Annotated[str, Field(description="生成图片的提示词")],
-        project_id: Annotated[str, Field(description="Google Flow 项目的唯一 ID 或名称，留空则自动选用最近访问的项目")] = "",
+        project_name: Annotated[str, Field(description="Google Flow 项目的名称，留空则自动选用最近访问的项目")] = "",
         assets: Annotated[str, Field(description="可选的参考素材名称，多个用逗号分隔")] = "",
         image_name: Annotated[str, Field(description="生成后的图片重命名名称，留空则自动生成")] = "",
         aspect_ratio: Annotated[str, Field(description="图片宽高比，例如 '16:9' 或 '9:16'")] = "16:9",
@@ -107,17 +106,18 @@ def register_image_create_tool(mcp: FastMCP) -> None:
                 "next_action": "参数错误，任务未启动，智能体请修正 download 参数后重新调用。"
             }, ensure_ascii=False)
 
-        # 0. Resolve empty project_id to the most recently accessed project
-        if not project_id or not project_id.strip():
+        effective_project_name = project_name.strip()
+        # 0. Resolve empty project_name to the most recently accessed project
+        if not effective_project_name:
             local_projs = ProjectCache.load().get("projects", {})
             if local_projs:
-                project_id = max(
+                effective_project_name = max(
                     local_projs.keys(),
                     key=lambda k: local_projs[k].get("last_accessed", "")
                 )
-                logger.info(f"image_create: project_id not provided, defaulting to latest project: {project_id}")
+                logger.info(f"image_create: project_name not provided, defaulting to latest project: {effective_project_name}")
             else:
-                project_id = "default"
+                effective_project_name = "default"
 
         job_id = str(uuid.uuid4())
         _jobs[job_id] = {
@@ -132,7 +132,7 @@ def register_image_create_tool(mcp: FastMCP) -> None:
             "next_action": f"任务初始化中（尚未完成），请等待 5 秒后继续调用 image_status(job_id='{job_id}') 检查进度。"
         }
         
-        logger.info(f"Starting image_create background job {job_id}: project={project_id}, download={download!r}")
+        logger.info(f"Starting image_create background job {job_id}: project={effective_project_name}, download={download!r}")
         
         def task_worker():
             try:
@@ -140,7 +140,8 @@ def register_image_create_tool(mcp: FastMCP) -> None:
                 page = browser.latest_tab
                 
                 # Navigate to project
-                url = f"https://flow.google.com/project/{project_id}"
+                from google_flow_mcp.utils.project_utils import ensure_project_exists
+                url = ensure_project_exists(effective_project_name, browser)
                 if page.url != url:
                     page.get(url)
                     time.sleep(4)
@@ -441,7 +442,7 @@ def register_image_create_tool(mcp: FastMCP) -> None:
                 }
 
         task_params = {
-            "project_id": project_id,
+            "project_name": effective_project_name,
             "prompt": prompt,
             "assets": assets,
             "image_name": image_name,
@@ -457,7 +458,7 @@ def register_image_create_tool(mcp: FastMCP) -> None:
             job_id=job_id,
             initial_state=_jobs[job_id],
             worker_fn=task_worker,
-            project_id=project_id,
+            project_id=effective_project_name,
             task_name=image_name or f"image_{job_id[:8]}",
             params=task_params,
             required_assets=required_assets,

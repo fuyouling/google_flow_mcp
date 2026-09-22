@@ -8,7 +8,6 @@ from loguru import logger
 from google_flow_mcp.cluster.models import (
     TaskPayload,
     TaskResult,
-    TaskStatus,
     TaskType,
     WorkerInfo,
     WorkerState,

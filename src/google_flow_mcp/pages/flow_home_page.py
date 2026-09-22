@@ -1,6 +1,4 @@
 from loguru import logger
-from DrissionPage import ChromiumPage
-from DrissionPage.common import Keys
 from typing import Optional
 from google_flow_mcp.pages.base_page import BasePage
 from google_flow_mcp.models.project_cache import ProjectCache
@@ -40,8 +38,7 @@ class FlowHomePage(BasePage):
 
     def get_projects(self) -> dict:
         """
-        Extract all project cards and save them to ProjectCache.
-        Returns the parsed dictionary.
+        Extract all project cards and return them as a dictionary keyed by project name.
         """
         logger.info("Extracting project list...")
         cards = self.tab.eles('css:flow-project-card')
@@ -53,10 +50,8 @@ class FlowHomePage(BasePage):
                 continue
                 
             href = link_ele.attr('href')
-            project_id = href.split('/')[-1] if href else ""
+            local_uuid = href.split('/')[-1] if href else ""
             
-            # The title text might include the icon text if we just call .text
-            # We want just the raw text node of the div, or we can replace the button text
             full_text = title_div.text
             btn_ele = title_div.ele('css:button', timeout=0)
             btn_text = btn_ele.text if btn_ele else ""
@@ -65,16 +60,17 @@ class FlowHomePage(BasePage):
             if not title:
                 title = full_text.strip()
                 
-            if project_id and title:
-                ProjectCache.update_project(project_id, title, href)
-                result[project_id] = {"name": title, "url": href}
+            if local_uuid and title:
+                if title in result:
+                    raise ValueError(f"检测到同名项目冲突: 存在多个名为 '{title}' 的项目。请进入 Google Flow 网页端手动将它们重命名以区分。")
+                result[title] = {"name": title, "url": href, "local_uuid": local_uuid}
                 
         logger.info(f"Extracted {len(result)} projects.")
         return result
 
-    def rename_project(self, project_id: str, old_title: str, new_title: str) -> bool:
+    def rename_project(self, old_title: str, new_title: str) -> bool:
         """
-        Rename a project by its old title (or id if we have a robust way).
+        Rename a project by its old title.
         Using old_title to find the specific card.
         """
         logger.info(f"Attempting to rename project from '{old_title}' to '{new_title}'...")
@@ -112,17 +108,10 @@ class FlowHomePage(BasePage):
         
         # Then type the new title and submit
         input_ele.input(new_title + '\n')
-        
         # Wait for inline input to disappear (reverts to normal label)
         is_deleted = self.tab.wait.ele_deleted(input_ele, timeout=5)
         if is_deleted:
             logger.info("Project renamed successfully via Enter key.")
-            
-            # Update cache if we have ID
-            if project_id:
-                proj = ProjectCache.get_project_by_id(project_id)
-                if proj:
-                    ProjectCache.update_project(project_id, new_title, proj["url"])
             return True
             
         logger.error("Failed to save project title (timeout waiting for input box to disappear).")

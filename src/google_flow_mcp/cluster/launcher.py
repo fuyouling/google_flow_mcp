@@ -7,13 +7,11 @@
 """
 
 import argparse
-import os
 import socket
 import sys
 import time
 from pathlib import Path
-from typing import List, Optional
-from loguru import logger
+from typing import List
 
 # 确保项目根目录在 sys.path 中
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -227,7 +225,7 @@ def cmd_worker(args: argparse.Namespace) -> None:
 
     from google_flow_mcp.cluster.worker_client import WorkerClient
 
-    print(f"\n[*] 正在连接 Master 节点...")
+    print("\n[*] 正在连接 Master 节点...")
     client = WorkerClient(
         master_url=master_url,
         grpc_target=grpc_target,

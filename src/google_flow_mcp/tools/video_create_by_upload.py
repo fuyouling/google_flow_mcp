@@ -24,7 +24,7 @@ def format_video_name(name: str) -> str:
 def register_video_create_by_upload_tool(mcp: FastMCP) -> None:
     @mcp.tool()
     def video_create_by_upload(
-        project_id: Annotated[str, Field(description="Google Flow 项目的唯一 ID 或名称，留空则自动选用最近访问的项目")],
+        project_name: Annotated[str, Field(description="Google Flow 项目的名称，留空则自动选用最近访问的项目")],
         video_path: Annotated[str, Field(description="待上传视频的本地绝对路径")],
         video_name: Annotated[str, Field(description="上传后的视频重命名名称（必填项）。名称中的所有空格将被自动统一替换为下划线 '_' 进行保存（例如 'My Video' 将转为 'My_Video'）")],
     ) -> str:
@@ -55,18 +55,28 @@ def register_video_create_by_upload_tool(mcp: FastMCP) -> None:
                 "message": f"待上传视频文件不存在: {video_path}"
             }, ensure_ascii=False)
 
-        # 0. Resolve empty project_id to the most recently accessed project
-        if not project_id or not project_id.strip():
-            from google_flow_mcp.models.project_cache import ProjectCache
-            local_projs = ProjectCache.load().get("projects", {})
-            if local_projs:
-                project_id = max(
-                    local_projs.keys(),
-                    key=lambda k: local_projs[k].get("last_accessed", "")
+        # 0. Resolve project_name to project_url
+        from google_flow_mcp.models.project_cache import ProjectCache
+        cache = ProjectCache.load()
+        projects = cache.get("projects", {})
+        
+        if not project_name or not project_name.strip():
+            if projects:
+                project_name = max(
+                    projects.keys(),
+                    key=lambda k: projects[k].get("last_accessed", "")
                 )
-                logger.info(f"video_create_by_upload: project_id not provided, defaulting to latest project: {project_id}")
+                logger.info(f"video_create_by_upload: project_name not provided, defaulting to latest project: {project_name}")
             else:
-                project_id = "default"
+                return json.dumps({
+                    "success": False,
+                    "status": "error",
+                    "is_finished": True,
+                    "error_type": "ValidationError",
+                    "error": "未提供 project_name，且本地缓存中没有最近访问的项目，无法创建视频。",
+                    "message": "未提供 project_name，且本地缓存中没有最近访问的项目，无法创建视频。",
+                    "next_action": "参数缺失，任务未启动，智能体请要求用户提供有效的项目名称后重试。"
+                }, ensure_ascii=False)
 
         job_id = str(uuid.uuid4())
         initial_state = {
@@ -79,16 +89,20 @@ def register_video_create_by_upload_tool(mcp: FastMCP) -> None:
 
         logger.info(
             f"Submitting video_create_by_upload task {job_id}: "
-            f"project={project_id}, name={video_name}, path={video_path}"
+            f"project={project_name}, name={video_name}, path={video_path}"
         )
 
         def task_worker():
             try:
                 browser = get_browser()
+                
+                from google_flow_mcp.utils.project_utils import ensure_project_exists
+                project_url = ensure_project_exists(project_name, browser)
+                
                 page = FlowVideoPage(browser.latest_tab)
 
                 # Step 1 ~ 3: Upload video from project home page and navigate to details
-                page.upload_video_on_project_page(project_id, video_path)
+                page.upload_video_on_project_page(project_url, video_path)
 
                 # Step 4 & 5: Rename in details view and auto-save via Enter
                 page.rename_and_save_in_detail(video_name)
@@ -115,7 +129,7 @@ def register_video_create_by_upload_tool(mcp: FastMCP) -> None:
                 }
 
         task_params = {
-            "project_id": project_id,
+            "project_name": project_name,
             "video_path": video_path,
             "video_name": formatted_name,
         }
@@ -124,7 +138,7 @@ def register_video_create_by_upload_tool(mcp: FastMCP) -> None:
             job_id=job_id,
             initial_state=initial_state,
             worker_fn=task_worker,
-            project_id=project_id,
+            project_id=project_name,
             task_name=f"upload_{formatted_name}",
             params=task_params,
         )

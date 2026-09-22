@@ -2,25 +2,21 @@ import argparse
 import asyncio
 import json
 import os
-import sys
 import threading
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Dict, Optional, Set
 from loguru import logger
 
-import grpc
 from grpc import aio as grpc_aio
 
 from google_flow_mcp.cluster.proto import cluster_pb2, cluster_pb2_grpc
 from google_flow_mcp.browser.session import get_browser
 from google_flow_mcp.cluster.asset_syncer import AssetSyncer
 from google_flow_mcp.cluster.models import (
-    AssetType,
     TaskPayload,
     TaskResult,
     TaskStatus,
-    TaskType,
 )
 from google_flow_mcp.pages.flow_home_page import FlowHomePage
 from google_flow_mcp.models.project_cache import ProjectCache

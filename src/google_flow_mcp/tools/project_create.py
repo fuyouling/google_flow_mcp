@@ -13,10 +13,10 @@ def register_project_create_tool(mcp: FastMCP) -> None:
     ) -> str:
         """
         在 Google Flow 中创建一个新项目，并可选择性地重命名。
-        返回新项目的 project_id 和 url。
+        返回新项目的 project_name 和 url。
         """
         from google_flow_mcp.models.project_cache import ProjectCache
-        
+        from google_flow_mcp.config import get_settings
         from google_flow_mcp.tasks.manager import task_manager
         
         logger.info(f"Executing project_create with title='{title}'")
@@ -40,30 +40,26 @@ def register_project_create_tool(mcp: FastMCP) -> None:
             page.open()
             
             new_id = page.create_project()
-            
-            # Extract new URL from cache
-            proj = ProjectCache.get_project_by_id(new_id)
-            url = proj["url"] if proj else f"https://flow.google.com/project/{new_id}"
+            url = f"https://flow.google.com/project/{new_id}"
+            final_title = "Untitled project"
             
             if title:
-                # We are already in the project editor after create_project,
-                # but rename_project expects to be on the home page.
-                # So we navigate back to home page to rename it via UI
-                # (unless there's a way to rename from the editor, but the home page is currently reliable).
-                logger.info(f"Navigating back to home to rename new project {new_id} to '{title}'")
+                logger.info(f"Navigating back to home to rename new project to '{title}'")
                 page.open()
-                success = page.rename_project(new_id, "Untitled project", title)
+                success = page.rename_project("Untitled project", title)
                 if not success:
                     return json.dumps({
                         "warning": "Project created but rename failed.",
-                        "project_id": new_id,
+                        "project_name": final_title,
                         "url": url
                     }, ensure_ascii=False)
+                final_title = title
+            
+            ProjectCache.update_project(final_title, url)
                     
             return json.dumps({
                 "success": True, 
-                "project_id": new_id, 
-                "name": title or "Untitled project", 
+                "project_name": final_title, 
                 "url": url
             }, ensure_ascii=False)
             

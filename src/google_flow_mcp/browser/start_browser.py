@@ -18,10 +18,7 @@
 
 import argparse
 import json
-import os
-import socket
 import sys
-import threading
 import time
 import urllib.request
 from pathlib import Path
@@ -42,7 +39,6 @@ if str(SRC_DIR) not in sys.path:
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-import psutil
 from DrissionPage import Chromium
 from loguru import logger
 
@@ -108,7 +104,7 @@ def check_status(port: int | None = None) -> None:
 
     cdp_ver = get_cdp_version(port)
     if cdp_ver:
-        print(f"CDP 协议: [正常可用]")
+        print("CDP 协议: [正常可用]")
         print(f"浏览器版本: {cdp_ver.get('Browser', 'Unknown')}")
         print(f"调试地址: {cdp_ver.get('webSocketDebuggerUrl', 'Unknown')}")
         tabs = get_cdp_tabs(port)

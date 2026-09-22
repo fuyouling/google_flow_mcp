@@ -24,7 +24,7 @@ def format_image_name(name: str) -> str:
 def register_image_create_by_upload_tool(mcp: FastMCP) -> None:
     @mcp.tool()
     def image_create_by_upload(
-        project_id: Annotated[str, Field(description="Google Flow 项目的唯一 ID 或名称，留空则自动选用最近访问的项目")],
+        project_name: Annotated[str, Field(description="Google Flow 项目的名称，留空则自动选用最近访问的项目")],
         image_path: Annotated[str, Field(description="待上传图片的本地绝对路径")],
         image_name: Annotated[str, Field(description="上传后的图片重命名名称（必填项）。名称中的所有空格将被自动统一替换为下划线 '_' 进行保存（例如 'My Picture' 将转为 'My_Picture'）")],
     ) -> str:
@@ -55,18 +55,20 @@ def register_image_create_by_upload_tool(mcp: FastMCP) -> None:
                 "message": f"待上传图片文件不存在: {image_path}"
             }, ensure_ascii=False)
 
-        # 0. Resolve empty project_id to the most recently accessed project
-        if not project_id or not project_id.strip():
-            from google_flow_mcp.models.project_cache import ProjectCache
-            local_projs = ProjectCache.load().get("projects", {})
-            if local_projs:
-                project_id = max(
-                    local_projs.keys(),
-                    key=lambda k: local_projs[k].get("last_accessed", "")
+        # 0. Resolve project_name to project_url
+        from google_flow_mcp.models.project_cache import ProjectCache
+        cache = ProjectCache.load()
+        projects = cache.get("projects", {})
+        
+        if not project_name or not project_name.strip():
+            if projects:
+                project_name = max(
+                    projects.keys(),
+                    key=lambda k: projects[k].get("last_accessed", "")
                 )
-                logger.info(f"image_create_by_upload: project_id not provided, defaulting to latest project: {project_id}")
+                logger.info(f"image_create_by_upload: project_name not provided, defaulting to latest project: {project_name}")
             else:
-                project_id = "default"
+                project_name = "default"
 
         job_id = str(uuid.uuid4())
         initial_state = {
@@ -79,7 +81,7 @@ def register_image_create_by_upload_tool(mcp: FastMCP) -> None:
 
         logger.info(
             f"Submitting image_create_by_upload task {job_id}: "
-            f"project={project_id}, name={image_name}, path={image_path}"
+            f"project={project_name}, name={image_name}, path={image_path}"
         )
 
         def task_worker():
@@ -87,8 +89,11 @@ def register_image_create_by_upload_tool(mcp: FastMCP) -> None:
                 browser = get_browser()
                 page = FlowImagePage(browser.latest_tab)
 
+                from google_flow_mcp.utils.project_utils import ensure_project_exists
+                project_url = ensure_project_exists(project_name, browser)
+
                 # Step 1 ~ 3: Upload image from project home page and navigate to details
-                page.upload_image_on_project_page(project_id, image_path)
+                page.upload_image_on_project_page(project_url, image_path)
 
                 # Step 4 & 5: Rename in details view and auto-save via Enter
                 page.rename_and_save_in_detail(image_name)
@@ -115,7 +120,7 @@ def register_image_create_by_upload_tool(mcp: FastMCP) -> None:
                 }
 
         task_params = {
-            "project_id": project_id,
+            "project_name": project_name,
             "image_path": image_path,
             "image_name": formatted_name,
         }
@@ -124,7 +129,7 @@ def register_image_create_by_upload_tool(mcp: FastMCP) -> None:
             job_id=job_id,
             initial_state=initial_state,
             worker_fn=task_worker,
-            project_id=project_id,
+            project_id=project_name,
             task_name=f"upload_{formatted_name}",
             params=task_params,
         )

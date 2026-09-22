@@ -1,5 +1,4 @@
 import json
-import threading
 import uuid
 import time
 from typing import Annotated
@@ -288,7 +287,7 @@ def register_video_create_tool(mcp: FastMCP) -> None:
     @mcp.tool()
     def video_create(
         prompt: Annotated[str, Field(description="视频生成的提示词 (Prompt)，详细描述视频画面、主体动作、镜头运镜及光影风格")],
-        project_id: Annotated[str, Field(description="Google Flow 项目的唯一 ID 或名称，视频将创建在该项目内。留空则自动使用最近访问的项目")] = "",
+        project_name: Annotated[str, Field(description="Google Flow 项目的名称，视频将创建在该项目内。留空则自动使用最近访问的项目")] = "",
         video_name: Annotated[str, Field(description="生成的视频重命名名称，便于在项目素材库中检索与引用。留空则自动生成随机名称")] = "",
         model_name: Annotated[str, Field(description="生成视频的模型名称。可选: 'Omni 1.1 Flash' (支持调节分辨率与时长，支持在素材模式下引用参考素材), 'Veo 3.1 - Lite', 'Veo 3.1 - Fast', 'Veo 3.1 - Quality' (电影级高画质与运镜；【极重要限制】Veo 模型除了帧模式可添加首帧与尾帧之外，不能再添加其它素材作为参考；在素材模式时添加素材作为参考，Veo 模型不会引用，引用素材请选择 Omni 模型)")] = "Omni 1.1 Flash",
         mode: Annotated[str, Field(description="生成模式: 'asset' (素材参考/纯文本模式，默认模式，若 assets 留空则为纯文本生视频；若提供 assets 则基于参考素材生视频，仅 Omni 模型支持引用素材) 或 'frame' (首尾帧模式，需同时提供 start_frame 和 end_frame)")] = "asset",
@@ -349,18 +348,28 @@ def register_video_create_tool(mcp: FastMCP) -> None:
         - 场景 4：Veo 高画质纯文本生视频 (Veo 3.1 Quality 横屏电影感)
           video_create(prompt="赛博朋克雨夜街道", model_name="Veo 3.1 - Quality", aspect_ratio="16:9")
         """
-        # 0. Resolve empty project_id to the most recently accessed project
-        if not project_id or not project_id.strip():
-            from google_flow_mcp.models.project_cache import ProjectCache
-            local_projs = ProjectCache.load().get("projects", {})
-            if local_projs:
-                project_id = max(
-                    local_projs.keys(),
-                    key=lambda k: local_projs[k].get("last_accessed", "")
+        # 0. Resolve project_name to project_url
+        from google_flow_mcp.models.project_cache import ProjectCache
+        cache = ProjectCache.load()
+        projects = cache.get("projects", {})
+        
+        if not project_name or not project_name.strip():
+            if projects:
+                project_name = max(
+                    projects.keys(),
+                    key=lambda k: projects[k].get("last_accessed", "")
                 )
-                logger.info(f"video_create: project_id not provided, defaulting to latest project: {project_id}")
+                logger.info(f"video_create: project_name not provided, defaulting to latest project: {project_name}")
             else:
-                project_id = "default"
+                return json.dumps({
+                    "success": False,
+                    "status": "error",
+                    "is_finished": True,
+                    "error_type": "ValidationError",
+                    "error": "未提供 project_name，且本地缓存中没有最近访问的项目，无法创建视频。",
+                    "message": "未提供 project_name，且本地缓存中没有最近访问的项目，无法创建视频。",
+                    "next_action": "参数缺失，任务未启动，智能体请要求用户提供有效的项目名称后重试。"
+                }, ensure_ascii=False)
 
         # 1. Parameter validation
         if download and download.strip().lower() not in ("270p", "720p", "1080p"):
@@ -427,7 +436,7 @@ def register_video_create_tool(mcp: FastMCP) -> None:
             "message": pending_msg,
             "next_action": f"任务初始化中（尚未完成），请等待 5-10 秒后继续调用 video_status(job_id='{job_id}') 检查进度。",
             "details": {
-                "project_id": project_id,
+                "project_name": project_name,
                 "model_name": model_name,
                 "mode": mode,
                 "start_frame": start_frame,
@@ -441,18 +450,21 @@ def register_video_create_tool(mcp: FastMCP) -> None:
             }
         }
 
-        logger.info(f"Starting video_create background job {job_id}: project={project_id}, mode={mode}")
+        logger.info(f"Starting video_create background job {job_id}: project={project_name}, mode={mode}")
 
         def task_worker():
             t0 = time.time()
             try:
                 browser = get_browser()
+                
+                from google_flow_mcp.utils.project_utils import ensure_project_exists
+                project_url = ensure_project_exists(project_name, browser)
+                
                 page = browser.latest_tab
 
                 # 1. Navigate to project
-                url = f"https://flow.google.com/project/{project_id}"
-                if page.url != url:
-                    page.get(url)
+                if page.url != project_url:
+                    page.get(project_url)
                     time.sleep(4)
 
                 # 2. Apply settings
@@ -645,7 +657,8 @@ def register_video_create_tool(mcp: FastMCP) -> None:
                     "rename_success": rename_success,
                     "elapsed_seconds": total_time,
                     "details": {
-                        "project_id": project_id,
+                        "project_name": project_name,
+                        "project_url": project_url,
                         "model_name": model_name,
                         "mode": mode,
                         "start_frame": start_frame,
@@ -673,7 +686,7 @@ def register_video_create_tool(mcp: FastMCP) -> None:
                 }
 
         task_params = {
-            "project_id": project_id,
+            "project_name": project_name,
             "prompt": prompt,
             "video_name": video_name,
             "model_name": model_name,
@@ -701,7 +714,7 @@ def register_video_create_tool(mcp: FastMCP) -> None:
             job_id=job_id,
             initial_state=_video_jobs[job_id],
             worker_fn=task_worker,
-            project_id=project_id,
+            project_id=project_name,
             task_name=video_name or f"video_{job_id[:8]}",
             params=task_params,
             required_assets=required_assets,

@@ -1,10 +1,7 @@
 import time
-import base64
 import shutil
 from pathlib import Path
 from loguru import logger
-from DrissionPage import ChromiumPage
-from DrissionPage.common import Keys
 from google_flow_mcp.pages.base_page import BasePage
 from google_flow_mcp.config import get_settings
 
@@ -16,10 +13,9 @@ class FlowCharacterPage(BasePage):
     def __init__(self, tab):
         super().__init__(tab)
 
-    def navigate_to_characters(self, project_id: str):
+    def navigate_to_characters(self, project_url: str):
         """Step 1 & 2: Navigate to characters page for a project."""
-        logger.info(f"Navigating to project {project_id} characters page...")
-        project_url = f"https://flow.google.com/project/{project_id}"
+        logger.info(f"Navigating to project characters page at {project_url}...")
         self.tab.get(project_url)
         time.sleep(4)
         
@@ -324,7 +320,7 @@ class FlowCharacterPage(BasePage):
                 logger.info("Detected agreement dialog, clicking '我同意，不再显示'...")
                 try:
                     agree_btn.click()
-                except Exception as e:
+                except Exception:
                     agree_btn.click(by_js=True)
                 time.sleep(1)
 
@@ -396,7 +392,7 @@ class FlowCharacterPage(BasePage):
                 logger.info("Detected agreement dialog, clicking '我同意，不再显示'...")
                 try:
                     agree_btn.click()
-                except Exception as e:
+                except Exception:
                     agree_btn.click(by_js=True)
                 time.sleep(1)
 
@@ -544,17 +540,19 @@ class FlowCharacterPage(BasePage):
         logger.warning("Could not find Done/Save button.")
         return False
 
-    def list_characters(self, project_id: str = "") -> list:
+    def list_characters(self, project_url: str = "") -> list:
         """
         List all characters in the current or specified project.
-        Extracts character count, name, and thumbnail image URL.
+        - If project_url is provided, navigates to the project if not already there.
+        - Locates sidebar button: //mat-list-item//span[text()="角色"]
+        - If button does not exist, returns empty list (indicating no characters).
+        - If button exists, clicks it to enter characters view and extracts all //flow-character-tile.
         """
-        logger.info(f"Listing characters (project_id='{project_id}')...")
-        if project_id:
+        logger.info(f"Listing characters (project_url='{project_url}')...")
+        if project_url:
             current_url = self.tab.url or ""
-            if f"/project/{project_id}" not in current_url:
-                project_url = f"https://flow.google.com/project/{project_id}"
-                logger.info(f"Navigating to project {project_id} ({project_url})...")
+            if project_url not in current_url:
+                logger.info(f"Navigating to project url ({project_url})...")
                 self.tab.get(project_url)
                 time.sleep(3)
 

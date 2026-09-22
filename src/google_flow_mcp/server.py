@@ -2,7 +2,6 @@ import atexit
 from loguru import logger
 from mcp.server.fastmcp import FastMCP
 
-from google_flow_mcp.browser.session import close_browser
 from google_flow_mcp.tools.website_open import register_website_open_tool
 from google_flow_mcp.tools.project_list import register_project_list_tool
 from google_flow_mcp.tools.project_open import register_project_open_tool

@@ -355,21 +355,31 @@ class MasterServer:
             logger.info(f"gRPC server listening on {listen_addr}")
             await self._grpc_server.wait_for_termination()
 
-        asyncio.run(serve())
+        try:
+            asyncio.run(serve())
+        except Exception as e:
+            logger.error(f"Cluster gRPC Server failed to start: {e}")
+            import os
+            os._exit(1)
 
     def _run_http_server(self) -> None:
         """Run the FastAPI/uvicorn HTTP server."""
-        config = uvicorn.Config(
-            app=self._fastapi_app,
-            host=self.host,
-            port=self.http_port,
-            log_level="warning",
-            access_log=False,
-        )
-        server = uvicorn.Server(config)
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(server.serve())
+        try:
+            config = uvicorn.Config(
+                app=self._fastapi_app,
+                host=self.host,
+                port=self.http_port,
+                log_level="warning",
+                access_log=False,
+            )
+            server = uvicorn.Server(config)
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(server.serve())
+        except Exception as e:
+            logger.error(f"Cluster HTTP Server failed to start: {e}")
+            import os
+            os._exit(1)
 
     def stop(self) -> None:
         """Gracefully stop both servers."""

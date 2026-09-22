@@ -50,3 +50,5 @@ account_cache.json
 docs/
 
 .agents
+
+.kilo/

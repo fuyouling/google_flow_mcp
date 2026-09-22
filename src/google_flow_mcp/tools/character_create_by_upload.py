@@ -31,7 +31,7 @@ def register_character_create_by_upload_tool(mcp: FastMCP) -> None:
         fullbody_image_path: Annotated[str, Field(description="全身像图片的本地绝对路径（可选），若提供则上传全身像")] = "",
         voice_name: Annotated[str, Field(description="角色的声音名称，例如 'Journey' 等，留空则不设置")] = "",
         voice_style: Annotated[str, Field(description="角色的声音风格，留空则不设置")] = "",
-        project_id: Annotated[str, Field(description="Google Flow 项目的唯一 ID 或名称，留空则自动选用最近访问的项目")] = "",
+        project_name: Annotated[str, Field(description="Google Flow 项目的名称，留空则自动选用最近访问的项目")] = "",
     ) -> str:
         """
         通过上传本地已有图片在 Google Flow 中创建一个新的虚拟角色（头像必传，全身像选传）。
@@ -68,18 +68,20 @@ def register_character_create_by_upload_tool(mcp: FastMCP) -> None:
                 "message": f"待上传全身像图片文件不存在: {fullbody_image_path}"
             }, ensure_ascii=False)
 
-        # 0. Resolve empty project_id to the most recently accessed project
-        if not project_id or not project_id.strip():
-            from google_flow_mcp.models.project_cache import ProjectCache
-            local_projs = ProjectCache.load().get("projects", {})
-            if local_projs:
-                project_id = max(
-                    local_projs.keys(),
-                    key=lambda k: local_projs[k].get("last_accessed", "")
+        # 0. Resolve project_name
+        from google_flow_mcp.models.project_cache import ProjectCache
+        cache = ProjectCache.load()
+        projects = cache.get("projects", {})
+        
+        if not project_name or not project_name.strip():
+            if projects:
+                project_name = max(
+                    projects.keys(),
+                    key=lambda k: projects[k].get("last_accessed", "")
                 )
-                logger.info(f"character_create_by_upload: project_id not provided, defaulting to latest project: {project_id}")
+                logger.info(f"character_create_by_upload: project_name not provided, defaulting to latest project: {project_name}")
             else:
-                project_id = "default"
+                project_name = "default"
 
         job_id = str(uuid.uuid4())
         initial_state = {
@@ -92,7 +94,7 @@ def register_character_create_by_upload_tool(mcp: FastMCP) -> None:
 
         logger.info(
             f"Submitting character_create_by_upload task {job_id}: "
-            f"project={project_id}, name={character_name}, "
+            f"project={project_name}, name={character_name}, "
             f"portrait={portrait_image_path}, fullbody={fullbody_image_path}"
         )
 
@@ -102,7 +104,9 @@ def register_character_create_by_upload_tool(mcp: FastMCP) -> None:
                 page = FlowCharacterPage(browser.latest_tab)
 
                 # Step 1 & 2: Navigate to characters page
-                page.navigate_to_characters(project_id)
+                from google_flow_mcp.utils.project_utils import ensure_project_exists
+                project_url = ensure_project_exists(project_name, browser)
+                page.navigate_to_characters(project_url)
 
                 # Step 3: Click 'New Character'
                 if not page.click_new_character():
@@ -155,7 +159,7 @@ def register_character_create_by_upload_tool(mcp: FastMCP) -> None:
                 }
 
         task_params = {
-            "project_id": project_id,
+            "project_name": project_name,
             "character_name": formatted_name,
             "portrait_image_path": portrait_image_path,
             "fullbody_image_path": fullbody_image_path,
@@ -167,7 +171,7 @@ def register_character_create_by_upload_tool(mcp: FastMCP) -> None:
             job_id=job_id,
             initial_state=initial_state,
             worker_fn=task_worker,
-            project_id=project_id,
+            project_id=project_name,
             task_name=f"upload_{formatted_name}",
             params=task_params,
         )

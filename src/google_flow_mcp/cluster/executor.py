@@ -2,7 +2,6 @@ import re
 import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
-from loguru import logger
 
 from google_flow_mcp.cluster.models import TaskPayload, TaskType
 from google_flow_mcp.pages.flow_character_page import FlowCharacterPage

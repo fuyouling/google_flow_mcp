@@ -7,10 +7,10 @@ from google_flow_mcp.browser.session import get_browser
 def register_project_open_tool(mcp: FastMCP) -> None:
     @mcp.tool()
     def project_open(
-        project_id: Annotated[str, Field(description="要打开的 Google Flow 项目的唯一 ID (UUID)")]
+        project_name: Annotated[str, Field(description="要打开的 Google Flow 项目的名称")]
     ) -> str:
         """
-        直接根据项目 ID 在浏览器中打开对应的 Google Flow 项目。
+        直接根据项目名称在浏览器中打开对应的 Google Flow 项目。
         它会利用本地缓存快速定位并加载页面。如果提示找不到，请先执行 `project_list` 刷新缓存。
         """
         from google_flow_mcp.models.project_cache import ProjectCache
@@ -18,7 +18,7 @@ def register_project_open_tool(mcp: FastMCP) -> None:
         
         from google_flow_mcp.tasks.manager import task_manager
         
-        logger.info(f"Executing project_open for UUID: {project_id}")
+        logger.info(f"Executing project_open for name: {project_name}")
 
         is_busy, busy_task = task_manager.is_browser_busy()
         if is_busy:
@@ -33,13 +33,15 @@ def register_project_open_tool(mcp: FastMCP) -> None:
                 "message": error_msg
             }, ensure_ascii=False)
         
-        proj = ProjectCache.get_project_by_id(project_id)
+        proj = ProjectCache.get_project_by_name(project_name)
         if not proj:
-            return json.dumps({"error": f"Project {project_id} not found in cache. Run project_list with force_refresh=True first."}, ensure_ascii=False)
+            return json.dumps({"error": f"Project '{project_name}' not found in cache. Run project_list with force_refresh=True first."}, ensure_ascii=False)
             
         url = proj.get("url")
         if not url:
-            url = f"https://flow.google.com/project/{project_id}"
+            # Fallback format if for some reason url is missing, though we don't have the UUID to fallback to easily here
+            # Instead just fail
+            return json.dumps({"error": f"URL for Project '{project_name}' is missing in cache."}, ensure_ascii=False)
             
         try:
             browser = get_browser()
@@ -48,7 +50,7 @@ def register_project_open_tool(mcp: FastMCP) -> None:
             browser.latest_tab.ele('css:flow-project-header', timeout=15)
             
             # Update last accessed in cache
-            ProjectCache.update_project(project_id, proj.get("name", "Unknown"), url)
+            ProjectCache.update_project(project_name, url)
             return json.dumps({"success": True, "url": url}, ensure_ascii=False)
         except Exception as e:
             logger.error(f"project_open failed: {str(e)}")
