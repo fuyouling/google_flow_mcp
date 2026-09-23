@@ -287,8 +287,26 @@ class TaskManager:
                             "next_action": f"任务排队中（第 {pos} 位），请等待 5-10 秒后继续查询进度。"
                         })
                         break
+            
+            # Format broadcast results if present
+            result_state = dict(state)
+            if "broadcast_results" in result_state and result_state["broadcast_results"]:
+                bcast_strs = []
+                for wid, res in result_state["broadcast_results"].items():
+                    status_str = "成功" if res == "success" else "失败"
+                    bcast_strs.append(f"{wid} {status_str}")
+                bcast_msg = ", ".join(bcast_strs)
+                
+                msg = result_state.get("message", "")
+                if msg:
+                    import re
+                    # Remove old broadcast status if already appended
+                    msg = re.sub(r'\s*\[广播状态:.*?\]', '', msg)
+                    result_state["message"] = f"{msg} [广播状态: {bcast_msg}]"
+                else:
+                    result_state["message"] = f"[广播状态: {bcast_msg}]"
 
-            return state
+            return result_state
 
     def cancel_task(self, job_id: str) -> dict:
         """

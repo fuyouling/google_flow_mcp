@@ -173,6 +173,7 @@ class ClusterScheduler:
         params: dict,
         required_assets: Optional[List[str]] = None,
         job_id: Optional[str] = None,
+        target_worker_id: Optional[str] = None,
     ) -> str:
         with self._lock:
             jid = job_id or str(uuid.uuid4())
@@ -185,6 +186,7 @@ class ClusterScheduler:
                 params=params,
                 required_assets=req_assets,
                 cost_credits=cost,
+                target_worker_id=target_worker_id,
             )
 
             # Initialize legacy status dict
@@ -274,6 +276,13 @@ class ClusterScheduler:
             for wid, w in self.workers.items()
             if w.state == WorkerState.IDLE and wid in self._worker_senders
         ]
+        
+        if task.target_worker_id:
+            if task.target_worker_id in candidate_ids:
+                candidate_ids = [task.target_worker_id]
+            else:
+                return None
+
         if not candidate_ids:
             return None
 
@@ -509,11 +518,17 @@ class ClusterScheduler:
                         self.jobs[job_id]["broadcast_results"][worker_id] = "success"
 
                         try:
-                            all_projects = ProjectCache.get_all_projects()
-                            current_project = task.project_alias
-                            for p in all_projects:
-                                p_name = p.get("name")
-                                if p_name and p_name != current_project:
+                            # Broadcast to all other workers' projects
+                            for wid, w in self.workers.items():
+                                if wid == worker_id:
+                                    continue
+                                
+                                # Find projects for this worker. Use 'default' if none mapped.
+                                w_projects = list(w.project_mappings.keys())
+                                if not w_projects:
+                                    w_projects = ["default"]
+                                
+                                for p_name in w_projects:
                                     broadcast_job_id = f"bcast_{uuid.uuid4().hex[:8]}"
                                     if is_image:
                                         self.submit_task(
@@ -524,7 +539,8 @@ class ClusterScheduler:
                                                 "origin_job_id": job_id,
                                             },
                                             required_assets=[asset_name],
-                                            job_id=broadcast_job_id
+                                            job_id=broadcast_job_id,
+                                            target_worker_id=wid
                                         )
                                     else:
                                         self.submit_task(
@@ -535,11 +551,12 @@ class ClusterScheduler:
                                                 "origin_job_id": job_id,
                                             },
                                             required_assets=[f"{asset_name}_Portrait", f"{asset_name}_Fullbody"],
-                                            job_id=broadcast_job_id
+                                            job_id=broadcast_job_id,
+                                            target_worker_id=wid
                                         )
                                     logger.info(
                                         f"Broadcasted {'image' if is_image else 'character'} '{asset_name}' "
-                                        f"to project {p_name} (bcast_job={broadcast_job_id})"
+                                        f"to worker {wid} project {p_name} (bcast_job={broadcast_job_id})"
                                     )
                         except Exception as e:
                             logger.error(f"Failed to broadcast {'image' if is_image else 'character'} {asset_name}: {e}")
@@ -618,10 +635,14 @@ class ClusterScheduler:
         # Failover logic
         if task.retry_count < self.max_retries:
             task.retry_count += 1
-            task.target_worker_id = None
-            logger.warning(
-                f"Failover: Re-queueing task {job_id} (retry {task.retry_count}/{self.max_retries}) due to: {reason}"
-            )
+            if not task.target_worker_id:
+                logger.warning(
+                    f"Failover: Re-queueing task {job_id} (retry {task.retry_count}/{self.max_retries}) due to: {reason}"
+                )
+            else:
+                logger.warning(
+                    f"Re-queueing targeted task {job_id} for worker {task.target_worker_id} (retry {task.retry_count}/{self.max_retries}) due to: {reason}"
+                )
             self.jobs[job_id].update({
                 "status": "queued",
                 "message": f"Retrying task after worker {worker_id} failure: {reason}. Retry {task.retry_count}/{self.max_retries}",
