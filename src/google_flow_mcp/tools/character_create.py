@@ -36,6 +36,9 @@ def register_character_create_tool(mcp: FastMCP) -> None:
         2. 若当前已有生成任务进行中，该任务将自动进入全局排队队列。
         3. 你**必须**使用 `character_status` 工具轮询这个 job_id 来获取最终的生成结果（包含本地下载路径，若 image_base64=True 还包含图片 base64 数据）。
         """
+        # 0. Normalize character_name: replace ASCII spaces with underscores
+        character_name = character_name.replace(' ', '_')
+
         # 0. Resolve project_name
         if not project_name or not project_name.strip():
             projects = ProjectCache.get_all_projects()
@@ -99,6 +102,11 @@ def register_character_create_tool(mcp: FastMCP) -> None:
 
                 # Step 6.6: Download portrait if requested
                 if download:
+                    task_manager.jobs[job_id].update({
+                        "status": "downloading",
+                        "is_finished": False,
+                        "message": f"角色头像生成完成，正在下载头像图片..."
+                    })
                     p_path = page.download_character_image(f"{character_name}_Portrait")
                     if p_path:
                         portrait_local_path = p_path
@@ -116,6 +124,11 @@ def register_character_create_tool(mcp: FastMCP) -> None:
                     
                     # Step 8.5: Download fullbody before saving character if requested
                     if download:
+                        task_manager.jobs[job_id].update({
+                            "status": "downloading",
+                            "is_finished": False,
+                            "message": f"角色全身像生成完成，正在下载全身像图片..."
+                        })
                         fb_path = page.download_character_image(f"{character_name}_Fullbody")
                         if fb_path:
                             fullbody_local_path = fb_path
@@ -194,6 +207,14 @@ def register_character_status_tool(mcp: FastMCP) -> None:
         Check the status of a background character creation job.
         Returns the job state, including images (base64 if requested) and local download paths if completed.
         Supports status polling and queue position tracking.
+
+        Status values:
+        - 'pending': Queued or initializing (is_finished=False).
+        - 'generating': Portrait or fullbody image is being generated (is_finished=False).
+        - 'downloading': Generated image is being downloaded to local disk (is_finished=False).
+        - 'completed': Character created successfully (is_finished=True).
+        - 'completed_with_download_warning': Character created but some image download failed (is_finished=True).
+        - 'error': Task failed, see error field (is_finished=True).
         """
         state = task_manager.get_task_status(job_id)
         return json.dumps(state, ensure_ascii=False)

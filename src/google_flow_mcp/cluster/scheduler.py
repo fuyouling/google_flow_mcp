@@ -28,9 +28,10 @@ class ClusterScheduler:
     - Compatible with legacy task_manager job dictionary format
     """
 
-    def __init__(self, max_retries: int = 2, heartbeat_timeout: float = 30.0):
+    def __init__(self, max_retries: int = 2, heartbeat_timeout: float = 30.0, asset_hub=None):
         self.max_retries = max_retries
         self.heartbeat_timeout = heartbeat_timeout
+        self._asset_hub = asset_hub  # Optional[AssetHub] — used to register master-local generated assets
         self._lock = threading.RLock()
 
         self.workers: Dict[str, WorkerInfo] = {}
@@ -103,7 +104,8 @@ class ClusterScheduler:
                 AccountCache.update(email=account, credits=init_credits, worker_id=worker_id)
             if project_mappings:
                 for proj_alias, local_uuid in project_mappings.items():
-                    ProjectCache.update_project(project_name=proj_alias, local_uuid=local_uuid, worker_id=worker_id)
+                    if proj_alias != local_uuid:
+                        ProjectCache.update_project(project_name=proj_alias, local_uuid=local_uuid, worker_id=worker_id)
             # ----------------------
             
             logger.info(
@@ -152,7 +154,8 @@ class ClusterScheduler:
             worker = self.workers.get(worker_id)
             if worker:
                 worker.project_mappings[project_alias] = local_uuid
-                ProjectCache.update_project(project_name=project_alias, local_uuid=local_uuid, worker_id=worker_id)
+                if project_alias != local_uuid:
+                    ProjectCache.update_project(project_name=project_alias, local_uuid=local_uuid, worker_id=worker_id)
                 logger.info(f"Updated project mapping for {worker_id}: {project_alias} -> {local_uuid}")
 
     def add_worker_cached_asset(self, worker_id: str, asset_name: str) -> None:
@@ -451,49 +454,95 @@ class ClusterScheduler:
                 TaskType.IMAGE_CREATE, TaskType.IMAGE_CREATE_BY_UPLOAD,
                 TaskType.CHARACTER_CREATE, TaskType.CHARACTER_CREATE_BY_UPLOAD
             ):
-                is_image = task.task_type in (TaskType.IMAGE_CREATE, TaskType.IMAGE_CREATE_BY_UPLOAD)
-                asset_name = None
-                if task.task_type in (TaskType.IMAGE_CREATE, TaskType.CHARACTER_CREATE):
-                    expected_type = "image" if is_image else "character"
-                    for p in result.produced_assets:
-                        if p.get("type") == expected_type and "name" in p:
-                            # For character, the name might be "Name_Portrait", we just need the base name. 
-                            # But wait, character_create returns the base name in task params!
-                            asset_name = task.params.get("character_name") if not is_image else p["name"]
-                            break
-                else:
-                    asset_name = task.params.get("image_name") if is_image else task.params.get("character_name")
-                
-                if asset_name:
-                    try:
-                        from google_flow_mcp.models.project_cache import ProjectCache
-                        all_projects = ProjectCache.get_all_projects()
-                        current_project = task.project_alias
-                        for p in all_projects:
-                            p_name = p.get("name")
-                            if p_name and p_name != current_project:
-                                # Submit broadcast upload task
-                                broadcast_job_id = f"bcast_{uuid.uuid4().hex[:8]}"
-                                
-                                if is_image:
-                                    self.submit_task(
-                                        task_type=TaskType.IMAGE_CREATE_BY_UPLOAD,
-                                        project_alias=p_name,
-                                        params={"image_name": asset_name},
-                                        required_assets=[asset_name],
-                                        job_id=broadcast_job_id
+                is_bcast_task = task.task_type in (
+                    TaskType.IMAGE_CREATE_BY_UPLOAD, TaskType.CHARACTER_CREATE_BY_UPLOAD
+                )
+
+                # --- Handle broadcast result callback ---
+                if is_bcast_task:
+                    origin_job_id = task.params.get("origin_job_id")
+                    if origin_job_id and origin_job_id in self.jobs:
+                        self.jobs[origin_job_id].setdefault("broadcast_results", {})
+                        self.jobs[origin_job_id]["broadcast_results"][worker_id] = "success"
+                        logger.info(f"Broadcast task {job_id} succeeded on {worker_id}, recorded in job {origin_job_id}")
+
+                # --- Originating task: register assets into AssetHub + broadcast to other workers ---
+                elif task.task_type in (TaskType.IMAGE_CREATE, TaskType.CHARACTER_CREATE):
+                    is_image = task.task_type == TaskType.IMAGE_CREATE
+
+                    # Register produced assets into AssetHub (covers master-local execution;
+                    # worker-side uploads are handled via HTTP by upload_result_asset).
+                    if self._asset_hub and result.produced_assets:
+                        from pathlib import Path
+                        from google_flow_mcp.cluster.models import AssetType
+                        for p in result.produced_assets:
+                            p_path = Path(p.get("local_path", ""))
+                            p_name = p.get("name", "")
+                            p_type = p.get("type", "image")
+                            if p_path.exists() and p_name:
+                                try:
+                                    at = AssetType.CHARACTER if p_type == "character" else AssetType.IMAGE
+                                    self._asset_hub.save_asset_file(
+                                        name=p_name, asset_type=at,
+                                        src_file_path=p_path, worker_id=worker_id
                                     )
-                                else:
-                                    self.submit_task(
-                                        task_type=TaskType.CHARACTER_CREATE_BY_UPLOAD,
-                                        project_alias=p_name,
-                                        params={"character_name": asset_name},
-                                        required_assets=[f"{asset_name}_Portrait", f"{asset_name}_Fullbody"],
-                                        job_id=broadcast_job_id
+                                    self.add_worker_cached_asset(worker_id, p_name)
+                                    logger.info(f"Asset '{p_name}' registered into AssetHub from {p_path}")
+                                except Exception as ae:
+                                    logger.warning(f"Failed to register asset '{p_name}' into AssetHub: {ae}")
+
+                    # Determine asset_name for broadcast
+                    asset_name = None
+                    if is_image:
+                        for p in result.produced_assets:
+                            if p.get("type") == "image" and "name" in p:
+                                asset_name = p["name"]
+                                break
+                        if not asset_name:
+                            asset_name = task.params.get("image_name")
+                    else:
+                        asset_name = task.params.get("character_name")
+
+                    if asset_name:
+                        # Initialize broadcast_results with the executing worker as 'success'
+                        self.jobs[job_id].setdefault("broadcast_results", {})
+                        self.jobs[job_id]["broadcast_results"][worker_id] = "success"
+
+                        try:
+                            all_projects = ProjectCache.get_all_projects()
+                            current_project = task.project_alias
+                            for p in all_projects:
+                                p_name = p.get("name")
+                                if p_name and p_name != current_project:
+                                    broadcast_job_id = f"bcast_{uuid.uuid4().hex[:8]}"
+                                    if is_image:
+                                        self.submit_task(
+                                            task_type=TaskType.IMAGE_CREATE_BY_UPLOAD,
+                                            project_alias=p_name,
+                                            params={
+                                                "image_name": asset_name,
+                                                "origin_job_id": job_id,
+                                            },
+                                            required_assets=[asset_name],
+                                            job_id=broadcast_job_id
+                                        )
+                                    else:
+                                        self.submit_task(
+                                            task_type=TaskType.CHARACTER_CREATE_BY_UPLOAD,
+                                            project_alias=p_name,
+                                            params={
+                                                "character_name": asset_name,
+                                                "origin_job_id": job_id,
+                                            },
+                                            required_assets=[f"{asset_name}_Portrait", f"{asset_name}_Fullbody"],
+                                            job_id=broadcast_job_id
+                                        )
+                                    logger.info(
+                                        f"Broadcasted {'image' if is_image else 'character'} '{asset_name}' "
+                                        f"to project {p_name} (bcast_job={broadcast_job_id})"
                                     )
-                                logger.info(f"Broadcasted {'image' if is_image else 'character'} '{asset_name}' sync to project {p_name}")
-                    except Exception as e:
-                        logger.error(f"Failed to broadcast {'image' if is_image else 'character'} {asset_name}: {e}")
+                        except Exception as e:
+                            logger.error(f"Failed to broadcast {'image' if is_image else 'character'} {asset_name}: {e}")
 
             # Update legacy job status dictionary
             job_dict = {
@@ -541,6 +590,14 @@ class ClusterScheduler:
         task = self.active_tasks.pop(job_id, None)
         if not task:
             return
+
+        # --- Broadcast task failure: write 'failed' into origin job's broadcast_results ---
+        if task.task_type in (TaskType.IMAGE_CREATE_BY_UPLOAD, TaskType.CHARACTER_CREATE_BY_UPLOAD):
+            origin_job_id = task.params.get("origin_job_id")
+            if origin_job_id and origin_job_id in self.jobs:
+                self.jobs[origin_job_id].setdefault("broadcast_results", {})
+                self.jobs[origin_job_id]["broadcast_results"][worker_id] = "failed"
+                logger.warning(f"Broadcast task {job_id} failed on {worker_id}, recorded in job {origin_job_id}")
 
         # Check if credits should be refunded (if failure occurred before generation started)
         last_status = self.jobs.get(job_id, {}).get("status", "")

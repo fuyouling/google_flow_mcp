@@ -127,7 +127,7 @@ def cmd_master(args: argparse.Namespace) -> None:
 
     print("\n[*] 启动集群调度中枢...")
     asset_hub = AssetHub(Path(settings.cluster_asset_dir))
-    cluster_scheduler = ClusterScheduler()
+    cluster_scheduler = ClusterScheduler(asset_hub=asset_hub)
     master_server = MasterServer(
         scheduler=cluster_scheduler,
         asset_hub=asset_hub,

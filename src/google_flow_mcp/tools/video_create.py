@@ -367,6 +367,10 @@ def register_video_create_tool(mcp: FastMCP) -> None:
                     "next_action": "参数缺失，任务未启动，智能体请要求用户提供有效的项目名称后重试。"
                 }, ensure_ascii=False)
 
+        # Normalize video_name: replace ASCII spaces with underscores
+        if video_name:
+            video_name = video_name.replace(' ', '_')
+
         # 1. Parameter validation
         if download and download.strip().lower() not in ("270p", "720p", "1080p"):
             return json.dumps({
@@ -619,6 +623,12 @@ def register_video_create_tool(mcp: FastMCP) -> None:
                 video_local_path = ""
                 download_warning = False
                 if download:
+                    _video_jobs[job_id].update({
+                        "status": "downloading",
+                        "is_finished": False,
+                        "message": f"视频生成完成，正在下载 {download} 视频...",
+                        "next_action": f"正在下载视频，请等待 5-10 秒后继续调用 video_status(job_id='{job_id}') 检查进度。"
+                    })
                     local_path = edit_page.download_video(resolution=download, expected_prefix=rename_name, timeout=120)
                     if local_path:
                         video_local_path = local_path
@@ -745,6 +755,7 @@ def register_video_status_tool(mcp: FastMCP) -> None:
         2. `status` 状态枚举说明：
            - 'pending': 任务排队中，正在初始化页面或配置参数（is_finished=False）。
            - 'generating': 视频正在生成中，可查看 progress_text（如 '45%'）、progress_percent（数值 45）及 elapsed_seconds 已耗时（is_finished=False）。
+           - 'downloading': 视频已生成完毕，正在下载视频到本地（is_finished=False）。
            - 'completed': 视频生成成功且重命名完成。若设置了 download，将返回 video_local_path 本地文件绝对路径（is_finished=True）。
            - 'completed_with_rename_warning': 视频生成成功，但重命名未成功（is_finished=True）。
            - 'completed_with_download_warning': 视频生成与重命名成功，但视频下载超时或失败（仍包含 video_url 线上链接）（is_finished=True）。

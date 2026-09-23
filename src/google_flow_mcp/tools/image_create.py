@@ -110,6 +110,9 @@ def register_image_create_tool(mcp: FastMCP) -> None:
             }, ensure_ascii=False)
 
         effective_project_name = project_name.strip()
+        # Normalize image_name: replace ASCII spaces with underscores
+        if image_name:
+            image_name = image_name.replace(' ', '_')
         # 0. Resolve empty project_name to the most recently accessed project
         if not effective_project_name:
             projects = ProjectCache.get_all_projects()
@@ -386,6 +389,12 @@ def register_image_create_tool(mcp: FastMCP) -> None:
                 image_local_path = ""
                 download_warning = False
                 if download in ("1K", "2K"):
+                    _jobs[job_id].update({
+                        "status": "downloading",
+                        "is_finished": False,
+                        "message": f"图片生成完成，正在下载 {download} 图片...",
+                        "next_action": f"正在下载图片，请等待 5 秒后继续调用 image_status(job_id='{job_id}') 检查进度。"
+                    })
                     local_path = edit_page.download_image(resolution=download, expected_prefix=rename_name)
                     if local_path:
                         image_local_path = local_path
@@ -483,6 +492,7 @@ def register_image_status_tool(mcp: FastMCP) -> None:
         2. `status` 状态枚举说明：
            - 'pending': 任务排队中，正在初始化页面或配置参数（is_finished=False）。
            - 'generating': 图片正在生成中，可查看 progress_text / progress_percent（is_finished=False）。
+           - 'downloading': 图片已生成完毕，正在下载高清图片到本地（is_finished=False）。
            - 'completed': 图片生成成功且重命名完成（is_finished=True）。
            - 'completed_with_rename_warning': 图片生成成功，但重命名未成功（is_finished=True）。
            - 'completed_with_download_warning': 图片生成成功，但高清图片下载超时或失败（is_finished=True）。

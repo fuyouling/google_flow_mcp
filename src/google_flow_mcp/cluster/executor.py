@@ -270,7 +270,11 @@ def execute_cluster_task(
         aspect_ratio = params.get("aspect_ratio", "16:9")
         model_name = params.get("model_name", "Nano Banana Pro")
         quantity = params.get("quantity", 1)
-        download = params.get("download", "")
+        
+        # Force download for Master-Worker synchronization
+        download = params.get("download", "2K")
+        if download not in ("1K", "2K"):
+            download = "2K"
 
         url = f"https://flow.google.com/project/{project_id}"
         if tab.url != url:
@@ -389,7 +393,9 @@ def execute_cluster_task(
         if fullbody_prompt:
             char_page.generate_fullbody(fullbody_prompt, model_name)
         
-        download = params.get("download", False)
+        # Force download for Master-Worker synchronization
+        download = True
+        
         portrait_local_path = ""
         fullbody_local_path = ""
         
