@@ -112,13 +112,19 @@ class AssetHub:
                 content = f.read()
 
             ext = src.suffix.lstrip(".") or "png"
-            return self.save_asset(
+            meta = self.save_asset(
                 name=name,
                 asset_type=asset_type,
                 file_bytes=content,
                 file_ext=ext,
                 worker_id=worker_id,
             )
+            try:
+                src.unlink()
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Could not remove source file {src}: {e}")
+            return meta
 
     def get_asset(self, name: str) -> Optional[AssetMetadata]:
         with self._lock:

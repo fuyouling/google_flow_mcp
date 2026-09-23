@@ -518,46 +518,42 @@ class ClusterScheduler:
                         self.jobs[job_id]["broadcast_results"][worker_id] = "success"
 
                         try:
-                            # Broadcast to all other workers' projects
+                            # Broadcast to all other workers using the original project alias
+                            original_project = task.project_alias
+
                             for wid, w in self.workers.items():
                                 if wid == worker_id:
                                     continue
                                 
-                                # Find projects for this worker. Use 'default' if none mapped.
-                                w_projects = list(w.project_mappings.keys())
-                                if not w_projects:
-                                    w_projects = ["default"]
-                                
-                                for p_name in w_projects:
-                                    broadcast_job_id = f"bcast_{uuid.uuid4().hex[:8]}"
-                                    if is_image:
-                                        self.submit_task(
-                                            task_type=TaskType.IMAGE_CREATE_BY_UPLOAD,
-                                            project_alias=p_name,
-                                            params={
-                                                "image_name": asset_name,
-                                                "origin_job_id": job_id,
-                                            },
-                                            required_assets=[asset_name],
-                                            job_id=broadcast_job_id,
-                                            target_worker_id=wid
-                                        )
-                                    else:
-                                        self.submit_task(
-                                            task_type=TaskType.CHARACTER_CREATE_BY_UPLOAD,
-                                            project_alias=p_name,
-                                            params={
-                                                "character_name": asset_name,
-                                                "origin_job_id": job_id,
-                                            },
-                                            required_assets=[f"{asset_name}_Portrait", f"{asset_name}_Fullbody"],
-                                            job_id=broadcast_job_id,
-                                            target_worker_id=wid
-                                        )
-                                    logger.info(
-                                        f"Broadcasted {'image' if is_image else 'character'} '{asset_name}' "
-                                        f"to worker {wid} project {p_name} (bcast_job={broadcast_job_id})"
+                                broadcast_job_id = f"bcast_{uuid.uuid4().hex[:8]}"
+                                if is_image:
+                                    self.submit_task(
+                                        task_type=TaskType.IMAGE_CREATE_BY_UPLOAD,
+                                        project_alias=original_project,
+                                        params={
+                                            "image_name": asset_name,
+                                            "origin_job_id": job_id,
+                                        },
+                                        required_assets=[asset_name],
+                                        job_id=broadcast_job_id,
+                                        target_worker_id=wid
                                     )
+                                else:
+                                    self.submit_task(
+                                        task_type=TaskType.CHARACTER_CREATE_BY_UPLOAD,
+                                        project_alias=original_project,
+                                        params={
+                                            "character_name": asset_name,
+                                            "origin_job_id": job_id,
+                                        },
+                                        required_assets=[f"{asset_name}_Portrait", f"{asset_name}_Fullbody"],
+                                        job_id=broadcast_job_id,
+                                        target_worker_id=wid
+                                    )
+                                logger.info(
+                                    f"Broadcasted {'image' if is_image else 'character'} '{asset_name}' "
+                                    f"to worker {wid} project {original_project} (bcast_job={broadcast_job_id})"
+                                )
                         except Exception as e:
                             logger.error(f"Failed to broadcast {'image' if is_image else 'character'} {asset_name}: {e}")
 
